@@ -4,34 +4,50 @@ from PIL import ImageTk, Image
 import math
 import subprocess as sb
 import time
+import json
 
 root = tk.Tk()
-# root.attributes('-fullscreen', 1)
+# root.state('normal')
 root.state('zoomed')
 
+#Fixed values
 startX = 38
 startY = 42
 pieceSize = 65
+padding = 5
 
+#current move
 whitesMove = True
+
+#for pawn promotion
 promotion = False
+promotionTo = ''
+promotionWin = None
+autoPromote = False
+
+#boardflip
 flipped = False
+
+#castling
 castlingShort = False
 castlingLong = False
+
+#enpassant
+enpassant = False
+
+#moving pieces
 movingPiece = None
 moveNotation = []
-LAN = ''
-againstAI = False
-promotionWin = None
 
-def char_range(c1, c2):
-    for c in range(ord(c1), ord(c2)+1):
-        yield chr(c)
+LAN = ''
+
+againstAI = False
+
+curr_index = -1
 
 myImg = ImageTk.PhotoImage(Image.open("board0.png").resize((pieceSize*8, pieceSize*8)))
 displayBoard = tk.Canvas(root, bg='white', width=pieceSize*8, height=pieceSize*8)
 Canvas_Image = displayBoard.create_image(0,0, image=myImg, anchor="nw")
-displayBoard.grid(row=0, column=0)
 
 rook_black = ImageTk.PhotoImage(Image.open("rook_black.png").resize((pieceSize, pieceSize)))
 king_black = ImageTk.PhotoImage(Image.open("king_black.png").resize((pieceSize, pieceSize)))
@@ -78,9 +94,6 @@ class Pieces:
 		global whitesMove
 
 		self.hasMoved = True
-		if(isPawn(self.letter)):
-			if((self.isWhite and y == 0) or (not self.isWhite and y == 7)):
-				popup_bonus(self, x, y)
 
 		self.matrixX = x
 		self.matrixY = y
@@ -126,7 +139,6 @@ class Pieces:
 			tempPosY += stepDirectionY
 
 		return False
-
 
 class King(Pieces):
 	def __init__(self, x, y, isWhite):
@@ -319,6 +331,7 @@ class Pawn(Pieces):
 			self.image= displayBoard.create_image(self.pixelPosX if pixelPosX is None else pixelPosX, self.pixelPosY if pixelPosY is None else pixelPosY, image=self.piece, anchor='nw' if anchorPos is None else anchorPos)
 
 	def canMove(self, x, y, board):
+		global enpassant
 
 		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
 			return False
@@ -329,13 +342,11 @@ class Pawn(Pieces):
 		if(self.canEnpassant is True):
 			if(self.isWhite):
 				if(y == (self.enpassant.matrixY - 1) and x == self.enpassant.matrixX):
-					self.enpassant.isTaken = True
-					self.enpassant.show()
+					enpassant = True
 					return True
 			else:
 				if(y == (self.enpassant.matrixY + 1) and x == self.enpassant.matrixX):
-					self.enpassant.isTaken = True
-					self.enpassant.show()
+					enpassant = True
 					return True
 
 		attacking = board.getPieceAt(x, y)
@@ -370,6 +381,8 @@ class Pawn(Pieces):
 		cloneObj.isTaken = self.isTaken
 		cloneObj.movingThisPiece = self.movingThisPiece
 		cloneObj.hasMoved = self.hasMoved
+		cloneObj.canEnpassant = self.canEnpassant
+		cloneObj.enpassant = self.enpassant
 		return cloneObj
 
 class Board:
@@ -484,11 +497,14 @@ class Board:
 		self.whitePieces.clear()
 		self.blackPieces.clear()
 
-curr_board = Board()
-clone_board = None
+def char_range(c1, c2):
+    for c in range(ord(c1), ord(c2)+1):
+        yield chr(c)
 
-def isInCheck(x, y, mine):
+#check if move is legal or not
+def isPseudoLegal(x, y, mine):
 	global curr_board
+	global whitesMove
 
 	clone_board = curr_board.clone()
 	ret = False
@@ -498,6 +514,10 @@ def isInCheck(x, y, mine):
 			taken = clone_board.getPieceAt(x, y)
 			if(taken is not None):
 				taken.isTaken = True
+			if(isPawn(clonePiece.letter)):
+				if(clonePiece.canEnpassant):
+					if((clonePiece.isWhite and clonePiece.enpassant.matrixY == y+1) or (not clonePiece.isWhite and clonePiece.enpassant.matrixY == y-1)):
+						clonePiece.enpassant.isTaken = True
 			clonePiece.matrixX = x
 			clonePiece.matrixY = y
 
@@ -515,26 +535,54 @@ def isInCheck(x, y, mine):
 	clone_board.destroy()
 	return ret
 
+#check if king in check or not
+def isInCheck(white):
+	global curr_board
+
+	clone_board = curr_board.clone()
+	ret = False
+
+	if(white):
+		targetX = clone_board.whitePieces[0].matrixX
+		targetY = clone_board.whitePieces[0].matrixY
+	else:
+		targetX = clone_board.blackPieces[0].matrixX
+		targetY = clone_board.blackPieces[0].matrixY
+
+	for clonePiece in clone_board.blackPieces if white else clone_board.whitePieces:
+		if(not clonePiece.isTaken and clonePiece.canMove(targetX, targetY, clone_board)):
+			ret = True
+			break
+
+	clone_board.destroy()
+	return ret
+
+#pawn promotion
 def promoteTo(event, piece, which, x, y):
 	global whitesMove
 	global curr_board
 	global promotionWin
+	global promotion
+	global moveNotation
+	global promotionTo
+	global autoPromote
 
 	newpiece = None
 	i = 0
+	promotionTo = which
 	piece.movingThisPiece = True
-	if(not whitesMove):
+	if(whitesMove):
 		n = len(curr_board.whitePieces)
 		while i < n:
 			if(curr_board.whitePieces[i].movingThisPiece):
 				if(which == 'Q'):
-					newpiece = Queen(x, y, not whitesMove)
+					newpiece = Queen(x, y, whitesMove)
 				elif(which == 'B'):
-					newpiece = Bishop(x, y, not whitesMove)
+					newpiece = Bishop(x, y, whitesMove)
 				elif(which == 'R'):
-					newpiece = Rook(x, y, not whitesMove)
+					newpiece = Rook(x, y, whitesMove)
 				elif(which == 'N'):
-					newpiece = Knight(x, y, not whitesMove)
+					newpiece = Knight(x, y, whitesMove)
 				curr_board.whitePieces[i] = newpiece
 			i += 1
 	else:
@@ -542,13 +590,13 @@ def promoteTo(event, piece, which, x, y):
 		while i < n:
 			if(curr_board.blackPieces[i].movingThisPiece):
 				if(which == 'Q'):
-					newpiece = Queen(x, y, not whitesMove)
+					newpiece = Queen(x, y, whitesMove)
 				elif(which == 'B'):
-					newpiece = Bishop(x, y, not whitesMove)
+					newpiece = Bishop(x, y, whitesMove)
 				elif(which == 'R'):
-					newpiece = Rook(x, y, not whitesMove)
+					newpiece = Rook(x, y, whitesMove)
 				elif(which == 'N'):
-					newpiece = Knight(x, y, not whitesMove)
+					newpiece = Knight(x, y, whitesMove)
 				curr_board.blackPieces[i] = newpiece
 			i += 1
 
@@ -564,25 +612,89 @@ def promoteTo(event, piece, which, x, y):
 		newpiece.pixelPosX = (7 - x)*pieceSize
 		newpiece.pixelPosY = (7 - y)*pieceSize
 
-	promotionWin.destroy()
+	# moveNotation[-1] = moveNotation[-1] + '=' + which + ('+' if isInCheck(whitesMove) else '')
+	# changeGameNotation(moveNotation)
 
+	# isGameOver()
+
+	if(not autoPromote):
+		promotionWin.destroy()
+	promotion = False
+
+#game end
+def isGameOver():
+	global curr_board
+	global whitesMove
+	global castlingShort
+	global castlingLong
+	global enpassant
+
+	ret = True
+	for piece in curr_board.whitePieces if whitesMove else curr_board.blackPieces:
+		if(not piece.isTaken):
+			piece.movingThisPiece = True
+			for x in range(0, 8):
+				for y in range(0, 8):
+					if(piece.canMove(x, y, curr_board) is True and isPseudoLegal(x, y, True) is False):
+						ret = False
+						break
+				if(not ret): break
+			piece.movingThisPiece = False
+			if(not ret): break
+
+	enpassant = False
+	castlingShort = False
+	castlingLong = False
+
+	result = ''
+
+	if(ret is True):
+		last = moveNotation[-1]
+		if(last != '1-0' and last != '0-1' and last != '1/2-1/2'):
+			if last[-1] == '+' or last[-1] == '#':
+				last = last[:-1]
+				moveNotation[-1] = last + '#'
+				if whitesMove:
+					result = '0-1'
+				else:
+					result = '1-0'
+			else:
+				result = '1/2-1/2'
+
+			moveNotation.append(result)
+			changeGameNotation(moveNotation)
+
+		for piece in curr_board.whitePieces:
+			piece.isTaken = True
+		for piece in curr_board.blackPieces:
+			piece.isTaken = True
+
+	return ret
+
+#SAN notation
 def getSAN(piece, x, y, isAttacking):
 
 	global curr_board
 	global whitesMove
 	global castlingShort
 	global castlingLong
+	global promotion
+	global enpassant
+	global promotionTo
 
 	currMoveNotation = ''
 	add = ''
-	for otherpiece in curr_board.whitePieces if whitesMove else curr_board.blackPieces:
+	for otherpiece in curr_board.whitePieces if piece.isWhite else curr_board.blackPieces:
 		if(not(piece.matrixX == otherpiece.matrixX and piece.matrixY == otherpiece.matrixY) and piece.letter == otherpiece.letter):
 			if(otherpiece.canMove(x, y, curr_board)):
 				if(piece.matrixX == otherpiece.matrixX):
 					add = str(8 - piece.matrixY)
 				else:
 					add = chr(ord('a') + piece.matrixX)
-	if(castlingShort is True):
+
+	if(enpassant is True):
+		currMoveNotation = piece.letter + 'x' + chr(ord('a') + piece.enpassant.matrixX) + str(8 - piece.matrixY + (1 if piece.isWhite else -1))
+	elif(castlingShort is True):
 		currMoveNotation = 'O-O'
 	elif(castlingLong is True):
 		currMoveNotation = 'O-O-O'
@@ -593,24 +705,32 @@ def getSAN(piece, x, y, isAttacking):
 	else:
 		currMoveNotation += piece.letter + add + chr(ord('a') + x) + str(8 - y)
 
-	if(isPawn(piece.letter)):
-		if((piece.isWhite and y == 0) or (not piece.isWhite and y == 7)):
-			currMoveNotation += '=Q'
-			if((piece.isWhite and curr_board.blackPieces[0].matrixY == 0) or (not piece.isWhite and curr_board.whitePieces[0].matrixY == 7)):
-				currMoveNotation += '+'
+	if(promotionTo != ''):
+		currMoveNotation += '=' + promotionTo
 
-	if(isInCheck(x, y, False)):
+	if(isPseudoLegal(x, y, False)):
 		currMoveNotation += '+'
 
 	return currMoveNotation
 
+#LAN notation
 def getLAN(piece, x, y):
-	currMoveNotation = chr(ord('a') + piece.matrixX) + str(8 - piece.matrixY) + chr(ord('a') + x) + str(8 - y) + ' '
+	global promotionTo
+
+	currMoveNotation = chr(ord('a') + piece.matrixX) + str(8 - piece.matrixY) + chr(ord('a') + x) + str(8 - y)
+	if(promotionTo != ''):
+		currMoveNotation += promotionTo.lower()
+		promotionTo = ''
+	currMoveNotation += ' ' 
 	return currMoveNotation
 
+#from LAN to SAN
 def LANtoSAN(move):
 	global curr_board
+	global autoPromote
+	global promotionTo
 
+	# print(move)
 	startX = ord(move[0]) - 97
 	startY = 8 - int(move[1])
 
@@ -621,16 +741,53 @@ def LANtoSAN(move):
 	y = 8 - int(move[3])
 
 	isAttacking = False
+	if(isPawn(piece.letter)):
+		if(piece.isWhite and startY == 3):
+			if(curr_board.isPieceAt(x, y) is False):
+				isAttacking = True
+		if(not piece.isWhite and startY == 4):
+			if(curr_board.isPieceAt(x, y) is False):
+				isAttacking = True
+
 	if(curr_board.isPieceAt(x, y) is True):
 		isAttacking = True
 
+	if(len(move) == 5):
+		if(againstAI):
+			autoPromote = True
+		promotionTo = move[4].upper()
+
 	ret = getSAN(piece, x, y, isAttacking)
+	# print(ret)
 	if(againstAI):
 		piece.movingThisPiece = True
-		moveTo(x, y, curr_board)
+		moveTo(x, y, curr_board, False)
 
 	return ret
 
+#fix notations
+def changeGameNotation(moveNotation):
+	global gameNotaion
+
+	allmoves = ''
+	moveNo = 1
+
+	gameNotaion.configure(state='normal')
+	gameNotaion.delete(1.0, tk.END)
+	for move in range(len(moveNotation)):
+		if(move % 2 == 0):
+			allmoves = str(moveNo) + ('.  ' if moveNo <= 9 else '. ')
+			left = 8 - len(moveNotation[move])
+			allmoves += moveNotation[move] + (' ' * left)
+			gameNotaion.insert(tk.END, allmoves, 'tag')
+			moveNo += 1
+		else:
+			gameNotaion.insert(tk.END, moveNotation[move] + '\n', 'tag1')
+	
+	gameNotaion.see(tk.END)
+	gameNotaion.configure(state='disabled')
+
+#update notations per move
 def updateNotation(piece, x, y, isAttacking):
 	global moveNotation
 	global LAN
@@ -639,49 +796,55 @@ def updateNotation(piece, x, y, isAttacking):
 
 	LAN += getLAN(piece, x, y)
 	moveNotation.append(currMoveNotation)
-	allmoves = ''
-	moveNo = 1
 
-	gameNotaion.configure(state='normal')
-	gameNotaion.delete(1.0, tk.END)
-	for move in range(len(moveNotation)):
-		if(move % 2 == 0):
-			allmoves = str(moveNo) + '. '
-			allmoves += moveNotation[move] + '\t'
-			# moveNo += 1
-			gameNotaion.insert(tk.END, allmoves, 'tag')
-			# gameNotaion.insert(tk.END,  moveNotation[move] + '\t', 'tag')
-			moveNo += 1
-		else:
-			# allmoves += moveNotation[move]
-			# allmoves += '\n'
-			gameNotaion.insert(tk.END, moveNotation[move] + '\n', 'tag1')
-	
-	# gameNotaion.insert(tk.INSERT, allmoves, 'tag')
-	gameNotaion.see(tk.END)
-	gameNotaion.configure(state='disabled')
+	changeGameNotation(moveNotation)
 
-def moveTo(x, y, board):
+#moving of pieces
+def moveTo(x, y, board, static):
 	global whitesMove
 	global movingPiece
-	global promotion
 	global castlingShort
 	global castlingLong
+	global enpassant
+	global promotion
+	global autoPromote
+	global promoteTo
 
 	for piece in (board.whitePieces if whitesMove else board.blackPieces):
 		if(piece.movingThisPiece is True):
-			if(piece.canMove(x, y, board) is True and isInCheck(x, y, True) is False):
+			if(isPseudoLegal(x, y, True) is False and piece.canMove(x, y, board) is True):
 				attacking = board.getPieceAt(x, y)
 				if(attacking is not None):
 					attacking.isTaken = True
 					attacking.show()
 
-				updateNotation(piece, x, y, True if attacking is not None else False)
+				if(isPawn(piece.letter)):
+					if((piece.isWhite and y == 0) or (not piece.isWhite and y == 7)):
+						promotion = True
+						if not autoPromote:
+							popup_bonus(piece, x, y)
+							root.update()
+							while(promotion):
+								root.update()
+						else:
+							promoteTo(None, piece, promotionTo, x, y)
+							autoPromote = False
+
+				if static is False:
+					updateNotation(piece, x, y, True if attacking is not None else False)
+
+				
 				if(isinstance(piece, Pawn)):
 					piece.letter = chr(ord('a') + x)
+
 				#move the piece, change turns
 				piece.move(x, y)
 				
+				if(enpassant):
+					piece.enpassant.isTaken = True
+					piece.enpassant.show()
+					enpassant = False
+
 				#if enpassant set to False
 				if(not whitesMove):
 					for piece in board.whitePieces:
@@ -707,15 +870,13 @@ def moveTo(x, y, board):
 							piece.move(3,y)
 					castlingLong = False
 
+				isGameOver()
 				return True
 			else:
 				piece.movingThisPiece = False
 	return False
 
-#mouse movement
-x = 0
-y = 0
-
+#mouse press
 def move(event):
 	global x
 	global y
@@ -731,6 +892,7 @@ def move(event):
 	if(movingPiece is not None and ((movingPiece.isWhite and not whitesMove) or (movingPiece.isWhite is False and whitesMove))):
 		movingPiece = None
 
+#mouse motion
 def motion(event):
 	global curr_board
 	global movingPiece
@@ -742,8 +904,10 @@ def motion(event):
 	tempPixelPosY = event.y
 	movingPiece.show(anchorPos='center', pixelPosX=tempPixelPosX, pixelPosY=tempPixelPosY)
 
+#mouse release
 def release(event):
 	global movingPiece
+	global curr_index
 	
 	if(movingPiece is None):
 		return
@@ -754,33 +918,35 @@ def release(event):
 		y = 7 - y
 	if(movingPiece is not None):
 		movingPiece.movingThisPiece = True
-		if(not moveTo(x, y, curr_board)):
+		if(not moveTo(x, y, curr_board, False)):
 			movingPiece.show()
 		else:
+			curr_index += 1
 			if(againstAI):
+				root.update()
 				runEngine()
 	else:
 		movingPiece.show()
 
+#check if letter betwn a-h
 def isPawn(a):
 	for c in char_range('a', 'h'):
 		if(a == c):
 			return True
 	return False
 
-moves = ['e4','d5','exd5','c6','dxc6','Bd7','cxb7','Nc6','bxa8=Q+']
-curr_index = -1
-
-def forward():
+#move through gamenotation forward by 1 move
+def forward(static, moveNotation):
 	global curr_index
+	global autoPromote
+	global promotionTo
 	
 	curr_index += 1
-	if(curr_index >= len(moves)):
+	if(curr_index >= len(moveNotation)):
 		return
 
-	notation = moves[curr_index]
+	notation = moveNotation[curr_index]
 	n = len(notation)
-
 	#check or mate notation
 	if(notation[n-1] == '+' or notation[n-1] == '#'):
 		notation = notation[:-1]
@@ -788,28 +954,30 @@ def forward():
 
 	#promotion notation
 	if(notation[n-2] == '='):
+		autoPromote = True
+		promotionTo = notation[n-1]
 		notation = notation[:-2]
 		n -= 2
-	
+		
 	movingPieceLetter = notation[0]
 	#castling notation
 	if(movingPieceLetter == 'O'):
 		if(n == 3):
 			if(curr_index % 2 == 0):
 				curr_board.whitePieces[0].movingThisPiece = True
-				moveTo(6, 7, curr_board)
+				moveTo(6, 7, curr_board, static)
 			else:
 				curr_board.blackPieces[0].movingThisPiece = True
-				moveTo(6, 0, curr_board)
+				moveTo(6, 0, curr_board, static)
 		else:
 			if(curr_index % 2 == 0):
 				moving = True
 				curr_board.whitePieces[0].movingThisPiece = True
-				moveTo(2, 7, curr_board)
+				moveTo(2, 7, curr_board, static)
 			else:
 				moving = True
 				curr_board.blackPieces[0].movingThisPiece = True
-				moveTo(2, 0, curr_board)
+				moveTo(2, 0, curr_board, static)
 		return
 
 	#pawn movement notation
@@ -819,7 +987,7 @@ def forward():
 		for piece in (curr_board.whitePieces if curr_index % 2 == 0 else curr_board.blackPieces):
 			if(piece.letter == movingPieceLetter and piece.canMove(x, y, curr_board)):
 				piece.movingThisPiece = True
-				moveTo(x, y, curr_board)
+				moveTo(x, y, curr_board, static)
 				return
 		
 	#normal piece movement notation
@@ -835,7 +1003,7 @@ def forward():
 		for piece in (curr_board.whitePieces if curr_index % 2 == 0 else curr_board.blackPieces):
 			if(piece.letter == movingPieceLetter and piece.isTaken is False and piece.canMove(x, y, curr_board)):
 				piece.movingThisPiece = True
-				moveTo(x, y, curr_board)
+				moveTo(x, y, curr_board, static)
 				return
 	#captures notation
 	elif(n == 4):
@@ -852,7 +1020,7 @@ def forward():
 						if((8 - int(notation[1])) != piece.matrixY):
 							continue
 				piece.movingThisPiece = True
-				moveTo(x, y, curr_board)
+				moveTo(x, y, curr_board, static)
 				return
 	#2 possible capture notation Raxe6
 	elif(n == 5):
@@ -867,28 +1035,36 @@ def forward():
 					if(piece.matrixY != (8 - int(notation[1]))):
 						continue
 				piece.movingThisPiece = True
-				moveTo(x, y, curr_board)
+				moveTo(x, y, curr_board, static)
 				return
 
 	elif(notation == '1/2-1/2'):
 		myLabel.config(text="Game ended in a draw")
 		return
 
+#move through gamenotation backward by 1move
 def backward():
 	global curr_index
+	global curr_board
+	global whitesMove
 
 	temp = curr_index - 1
 
-	new()
+	curr_board.destroy()
+	curr_board = Board()
+	curr_board.show()
+	curr_index = -1
+	whitesMove = True
+
 	if(temp < 0):
 		curr_index = -1
 		return
 
 	i = 0
 	while i <= temp:
-		forward()
+		forward(True, moveNotation)
 		i += 1
-	curr_index = temp
+	# curr_index = temp
 
 #new game
 def new():
@@ -900,17 +1076,15 @@ def new():
 	global flipped
 	global moveNotation
 	global LAN
-	global compMove
 	global againstAI
-	global play_computer_button
+	global playComputerButton
 
-	print(LAN)
 	curr_board.destroy()
 	curr_board = Board()
 	curr_board.show()
 	curr_index = -1
 	whitesMove = True
-	promotion = False
+	promotion = ''
 	flipped = False
 	movingPiece = Pieces(0, 0, True)
 	moveNotation = []
@@ -918,68 +1092,79 @@ def new():
 	gameNotaion.configure(state='normal')
 	gameNotaion.delete(1.0, tk.END)
 	myLabel.config(text='')
-	play_computer_button.config(text='Play Against Computer')
-	compMove = ''
+	playComputerButton.config(text='Play Computer')
 	againstAI = False
 
 #flip the board
 def flip():
+	global curr_board
+
 	curr_board.flipBoard()
 
-engine = None
+#initialize engine
 def initEngine():
 	global engine
 
 	engine = sb.Popen('D:\\CPP\\Chess\\stockfish12.exe', stdin=sb.PIPE, stdout=sb.PIPE, stderr=sb.STDOUT)
-	put(b'uci\n', inf_list, 0)
+	put(b'uci\n', inf_list, 0, b'isready\n', 'readyok')
 	myLabel.config(text='Engine Loaded')
 
-def put(command, inf_list, tmp_time):
+#put commands to engine
+def put(command, inf_list, tmp_time, stopText, stopMatch):
 
 	engine.stdin.write(command)
 	engine.stdin.flush()
 	time.sleep(tmp_time)
 
 	if command != "quit":
-		engine.stdin.write(b'isready\n')     
+		engine.stdin.write(stopText)     
 		engine.stdin.flush()
 		while True:
 			text = engine.stdout.readline().strip()
-			if text == (b'readyok'):
+			res = text.decode().split()
+			if len(res) > 0 and res[0] == stopMatch:
 				break
 			elif text !='':
 				inf_list.append(text)
 
 	engine.stdout.flush()
-inf_list = []
-compMove = ''
 
+#choose commands for engine
 def runEngine():
 	global LAN
 	global inf_list
-	global compMove
 	global engine
 
 	if engine is None:
 		initEngine()
 	inf_list.clear()
+
 	command = b'position startpos moves ' + LAN.encode() + b'\n'
+	put(command, inf_list, 0, b'isready\n', 'readyok')
 
-	put(command, inf_list, 0)
-
-	put(b'd\n', inf_list, 0)
-
-	command = b'go movetime 1000\n'
-	put(command, inf_list, 2)
+	command = b'go\n'
+	put(command, inf_list, 2, b'stop\n', 'bestmove')
 
 	result = inf_list[-1].decode().split()
 	inf_list.clear()
-	print(result)
-	myLabel.config(text='Best Move: ' + LANtoSAN(result[1]))
 
+	move = ''
+	try:
+		move = LANtoSAN(result[1])
+	except:
+		for each in result:
+			if(len(each) == 4 or len(each) == 5):
+				if(isPawn(each[0]) and isPawn(each[2]) and (not each[1].isalpha() and int(each[1]) >= 1 and int(each[1]) <= 8) and (not each[3].isalpha() and int(each[3]) >= 1 and int(each[3]))):
+					move = LANtoSAN(each)
+					break
+	myLabel.config(text='Best Move: ' + move)
+	return move
+
+#play against stockfish
 def play_computer():
 	global againstAI
 	global engine
+	global moveNotation
 
 	if engine is None:
 		initEngine()
@@ -987,60 +1172,36 @@ def play_computer():
 	againstAI = not againstAI
 
 	if(againstAI):
-		play_computer_button.config(text='Stop Playing Against Computer')
+		playComputerButton.config(text='Vs Player')
 	else:
-		play_computer_button.config(text='Play Against Computer')
+		playComputerButton.config(text='Vs Computer')
 
+#stockfish vs stockfish
+def compMode():
+	global engine
+	global moveNotation
 
-def callback(event):
-	global gameNotaion
-	# get the index of the mouse click
-	index = event.widget.index("@%s,%s" % (event.x, event.y))
-	event.widget.focus_set()
-	#get the indices of all "adj" tags
-	tag_indices = list(event.widget.tag_ranges('tag'))
-	gameNotaion.configure(state='normal')
-	text = ''
-	# iterate them pairwise (start and end index)
-	for start, end in zip(tag_indices[0::2], tag_indices[1::2]):
-    # check if the tag matches the mouse click index
-		if event.widget.compare(start, '<=', index) and event.widget.compare(index, '<', end):
-        # return string between tag start and end
-			gameNotaion.tag_add(tk.SEL, start, end)
-			print(start, end, event.widget.get(start, end))
-			text = event.widget.get(start, end)
+	if engine is None:
+		initEngine()
 
-	print(text)
-	highlight_pattern(gameNotaion, text, 'tag')
-	gameNotaion.configure(state='disabled')
+	if(curr_index != len(moveNotation) - 1):
+		while(curr_index != len(moveNotation) - 1):
+			forward(True, moveNotation)
+	
+	engineMoves=[]
+	for each in moveNotation:
+		engineMoves.append(each)
+	while not isGameOver():
+		engineMoves.append(runEngine())
+		forward(False, engineMoves)
+		root.update()
 
-def highlight_pattern(gameNotaion, pattern, tag, start="1.0", end="end", regexp=False):
-	'''Apply the given tag to all text that matches the given pattern
-
-	If 'regexp' is set to True, pattern will be treated as a regular
-	expression according to Tcl's regular expression syntax.
-	'''
-
-	start = gameNotaion.index(start)
-	end = gameNotaion.index(end)
-	gameNotaion.mark_set("matchStart", start)
-	gameNotaion.mark_set("matchEnd", start)
-	gameNotaion.mark_set("searchLimit", end)
-
-	count = tk.IntVar()
-	while True:
-		index = gameNotaion.search(pattern, "matchEnd","searchLimit",count=count, regexp=regexp)
-		if index == "": break
-		if count.get() == 0: break # degenerate pattern which matches zero-length strings
-		gameNotaion.mark_set("matchStart", index)
-		gameNotaion.mark_set("matchEnd", "%s+%sc" % (index, count.get()))
-		gameNotaion.tag_add('highlight', "matchStart", "matchEnd")
-
+#promotion select window
 def popup_bonus(piece, x, y):
 	global whitesMove
 	global promotionWin
 
-	promotionWin = tk.Toplevel()
+	promotionWin = tk.Toplevel(root)
 	promotionWin.title("Promote To")
 	promotionWin.geometry("%dx%d+%d+%d" % (280, 65, pieceSize, pieceSize if whitesMove else pieceSize*7))
 	promotionWin.overrideredirect(True) 
@@ -1062,27 +1223,153 @@ def popup_bonus(piece, x, y):
 	bishop.bind("<Button-1>",lambda event, piece=piece, x=x, y=y, which="B" : promoteTo(event, piece, which, x, y))
 	knight.bind("<Button-1>",lambda event, piece=piece, x=x, y=y, which="N" : promoteTo(event, piece, which, x, y))
 
-gameNotaion = tk.scrolledtext.ScrolledText(root, state='disabled', width = 15, height=30)
-gameNotaion['font'] = ('consolas', '12')
-gameNotaion.tag_bind("tag", "<Button-1>", callback)
-myLabel = tk.Label(root, text="")
+#search database for games
+def searchDB():
+	global dbInfo
+	global moveNotation
+
+	db = open('chessdotcomdb.json', 'r')
+	data = json.load(db)
+	dbInfo.configure(state='normal')
+	dbInfo.delete(1.0, tk.END)
+
+	asWhite = 0
+	asBlack = 0
+	nextWhite = {}
+	nextBlack = {}
+	for game in data['match']:
+		n1 = len(moveNotation)
+		n2 = len(game['moves'])
+		flag = False
+		i = 0
+		j = 0
+		while(i < n1 and j < n2 and moveNotation[i] == game['moves'][j]):
+			i += 1
+			j += 1
+
+		if(i == n1 and j < n2):
+			if(game['isWhite']):
+				asWhite += 1
+				try:
+					nextWhite[game['moves'][j]] += 1
+				except:
+					nextWhite[game['moves'][j]] = 1
+			else:
+				asBlack += 1
+				try:
+					nextBlack[game['moves'][j]] += 1
+				except:
+					nextBlack[game['moves'][j]] = 1
+
+	dbInfo.insert(tk.END, 'You have reached this position as White %d times\n' % asWhite)
+
+	for key, value in sorted(nextWhite.items(), key=lambda item: item[1], reverse=True):
+		dbInfo.insert(tk.END, 'Move: %s - %d times\n' % (key, value))
+
+	dbInfo.insert(tk.END, '\nYou have reached this position as Black %d times\n' % asBlack)
+
+	for key, value in sorted(nextBlack.items(), key=lambda item: item[1], reverse=True):
+		dbInfo.insert(tk.END, 'Move: %s - %d times\n' % (key, value))
+
+	dbInfo.configure(state='disabled')
+
+#load pgn
+def load():
+	global curr_index
+	global curr_board
+	global whitesMove
+
+	new()
+	moves = pgnText.get('1.0', tk.END).split()
+	move = []
+	length = len(moves)
+	moveNo = 1
+	j = 0
+	while j < length: 
+		if(moves[j] == (str(moveNo) + '.')): 
+			turn = ""
+			try:
+				turn += moves[j]
+				move.append(moves[j+1])
+				move.append(moves[j+2])
+				moveNo = moveNo + 1
+			except:
+				break
+		j = j+1
+
+	for each in move:
+		forward(False, move)
+
+	curr_index = -1
+	curr_board.destroy()
+	curr_board = Board()
+	curr_board.show()
+	whitesMove = True
+
+	gameNotaion.see(1.0)
+	pgnText.delete(1.0, tk.END)
+	pgnText.insert(tk.END, "PGN Loaded\n")
+
+curr_board = Board()
+clone_board = None
+
+#mouse movement
+x = 0
+y = 0
+
+engine = None
+inf_list = []
+
+#Game Board
+displayBoard.grid(row=0, column=0, sticky='nw', padx=padding, pady=padding)
+#Drag and drop pieces
 displayBoard.bind('<Button-1>', move)
 displayBoard.bind('<B1-Motion>', motion)
 displayBoard.bind('<ButtonRelease-1>', release)
-arrow_frame = tk.Frame(root)
-arrow_frame.grid(row=1, column=1)
-forward_button = tk.Button(arrow_frame, text="->", command=forward)
-backward_button = tk.Button(arrow_frame, text="<-", command=backward)
-runEngine_button = tk.Button(root, text="Best Move", command=runEngine)
-new_button = tk.Button(root, text="New Game", command=new)
-flip_button = tk.Button(root, text="Flip Board", command=flip)
-play_computer_button = tk.Button(root, text="Play Against Computer", command=play_computer)
-gameNotaion.grid(row=0, column=1, sticky='nw')
+
+#Move List
+gameNotaion = tk.scrolledtext.ScrolledText(root, state='disabled', width = 20, height=27)
+gameNotaion['font'] = ('consolas', '12')
+gameNotaion.grid(row=0, column=1, sticky='nw', padx=padding, pady=padding)
+
+#DB and PGN
+addon = tk.Frame()
+dbInfo = tk.scrolledtext.ScrolledText(addon, state='disabled', width = 50, height = 13)
+pgnText = tk.scrolledtext.ScrolledText(addon, width=50, height = 12)
+searchDbButton = tk.Button(addon, text='Search DB', command=searchDB)
+loadPGN = tk.Button(addon, text="Load PGN", command=load)
+addon.grid(row=0, column=2, sticky='nw', padx=padding, pady=padding)
+dbInfo.grid(row=0, column=0, padx=padding, pady=padding)
+searchDbButton.grid(row=1, column=0, padx=padding, pady=padding)
+pgnText.grid(row=2, column=0, padx=padding, pady=padding)
+loadPGN.grid(row=3, column=0, padx=padding, pady=padding)
+
+#Additional Text
+myLabel = tk.Label(root, text="")
 myLabel.grid(row=1, column=0)
-forward_button.grid(row=1, column=2)
-backward_button.grid(row=1, column=1)
-flip_button.grid(row=2, column=1)
-new_button.grid(row=2, column=0)
-runEngine_button.grid(row=3, column=1)
-play_computer_button.grid(row=3, column=0)
+
+#Go through game
+arrowFrame = tk.Frame(root)
+backwardButton = tk.Button(arrowFrame, text="<-", command=backward)
+forwardButton = tk.Button(arrowFrame, text="->", command=lambda: forward(True, moveNotation))
+arrowFrame.grid(row=1, column=1)
+backwardButton.grid(row=1, column=0, padx=padding, pady=padding)
+forwardButton.grid(row=1, column=1, padx=padding, pady=padding)
+
+#Major Buttons
+buttonsRow0 = tk.Frame(root)
+buttonsRow1 = tk.Frame(root)
+newButton = tk.Button(buttonsRow0, text="New Game", command=new)
+flipButton = tk.Button(buttonsRow0, text="Flip Board", command=flip)
+bestMoveButton = tk.Button(buttonsRow0, text="Best Move", command=runEngine)
+playComputerButton = tk.Button(buttonsRow1, text="Vs Computer", command=play_computer)
+betweenEngine = tk.Button(buttonsRow1, text="Comp Vs Comp", command=compMode)
+buttonsRow0.grid(row=2, column=0)
+buttonsRow1.grid(row=3, column=0)
+newButton.grid(row=0, column=0, padx=padding, pady=padding)
+flipButton.grid(row=0, column=1, padx=padding, pady=padding)
+bestMoveButton.grid(row=0, column=2, padx=padding, pady=padding)
+playComputerButton.grid(row=0, column=0, padx=padding, pady=padding)
+betweenEngine.grid(row=0, column=1, padx=padding, pady=padding)
+
 root.mainloop()
