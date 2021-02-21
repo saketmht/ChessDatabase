@@ -11,6 +11,7 @@ import traceback
 root = tk.Tk()
 # root.state('normal')
 root.state('zoomed')
+# root.configure(background='grey')
 
 #Fixed values
 startX = 40
@@ -30,20 +31,23 @@ color = '#FF0000'
 movingPiece = None
 moveNotation = []
 
-LAN = ''
+evalLines = [None] * 400
+evaluation = ''
+
+LAN = []
 
 #for engine use
 againstAI = False
 stopped = False
 firstTime = True
-analyzing = True
 analyzingThread = None
 analyzingMode = False
 
 curr_index = -1
+last_tag = ''
 
 myImg = ImageTk.PhotoImage(Image.open("board0.png").resize((pieceSize*8, pieceSize*8)))
-mainFrame = tk.Frame(root, bg='white', width=50)
+mainFrame = tk.Frame(root, bg='#A0522D')
 displayBoard = tk.Canvas(mainFrame, width=pieceSize*8 + startX, height=pieceSize*8 + startY)
 displayBoard.create_image(startX,startY, image=myImg, anchor="nw")
 
@@ -106,7 +110,6 @@ class Pieces:
 			self.pixelPosY = (7 - y)*pieceSize + startY
 
 		self.show()
-		board.whitesMove = not board.whitesMove
 		self.movingThisPiece = False
 
 	def attackingAllies(self, x, y, board):
@@ -375,6 +378,7 @@ class Board:
 		self.autoPromote = False
 		self.promotionTo = ''
 		self.enpassant = False
+		self.isClone = False
 		self.setUpBoard()
 
 	def setUpBoard(self):
@@ -460,6 +464,7 @@ class Board:
 		clone.castlingLong = self.castlingLong
 		clone.whitesMove = self.whitesMove
 		clone.enpassant = self.enpassant
+		clone.isClone = True
 		for each in clone.whitePieces if clone.whitesMove else clone.blackPieces:
 			if(isPawn(each.letter) and each.canEnpassant):
 				x = each.enpassant.matrixX
@@ -500,10 +505,6 @@ class Board:
 		self.show()
 		self.whitePieces.clear()
 		self.blackPieces.clear()
-
-# def char_range(c1, c2):
-#     for c in range(ord(c1), ord(c2)+1):
-#         yield chr(c)
 
 #check if move is legal or not
 def isPseudoLegal(x, y, mine, board):
@@ -607,6 +608,9 @@ def promoteTo(event, piece, which, x, y, board):
 		newpiece.pixelPosX = (7 - x)*pieceSize + startX
 		newpiece.pixelPosY = (7 - y)*pieceSize + startY
 
+	if(board.isClone):
+		newpiece.piece = None
+		
 	newpiece.show()
 
 	if(not board.autoPromote):
@@ -656,6 +660,16 @@ def isGameOver(board, static):
 			piece.isTaken = True
 		for piece in board.blackPieces:
 			piece.isTaken = True
+
+		depth1.config(text='')
+		score1.config(text='')
+		line1.config(text='')
+		depth2.config(text='')
+		score2.config(text='')
+		line2.config(text='')
+		depth3.config(text='')
+		score3.config(text='')
+		line3.config(text='')
 
 	return ret
 
@@ -852,22 +866,42 @@ def LANtoSAN(move, board, static):
 #fix notations
 def changeGameNotation(moveNotation):
 	global gameNotaion
+	global last_tag
 
 	allmoves = ''
 	moveNo = 1
-
+	tag_count = 0
 	gameNotaion.configure(state='normal')
 	gameNotaion.delete(1.0, tk.END)
+
+	for tag in gameNotaion.tag_names():
+		gameNotaion.tag_delete(tag)
+
 	for move in range(len(moveNotation)):
+		allmoves = ''
 		if(move % 2 == 0):
 			if(moveNotation[move] != '1-0' and moveNotation[move] != '0-1' and moveNotation[move] != '1/2-1/2'):
 				allmoves += str(moveNo) + ('.  ' if moveNo <= 9 else '. ')
-			left = 8 - len(moveNotation[move])
-			allmoves += moveNotation[move] + (' ' * left)
+			gameNotaion.insert(tk.END, allmoves)
 			moveNo += 1
+
+			allmoves = ''
+			curr_tag = 'tag' + str(tag_count)
+			left = 8 - len(moveNotation[move])
+			allmoves = moveNotation[move]
+			gameNotaion.insert(tk.END, allmoves, curr_tag)
+			gameNotaion.insert(tk.END, (' ' * left))
 		else:
-			allmoves += moveNotation[move] + '\n'
-	gameNotaion.insert(tk.END, allmoves, 'tag')
+			allmoves = moveNotation[move] + '\n'
+			curr_tag = 'tag' + str(tag_count)
+			gameNotaion.insert(tk.END, allmoves, curr_tag)
+
+		gameNotaion.tag_bind(curr_tag, "<Button-1>", lambda event, tag = curr_tag, moveNo=moveNo-1: callback(event, tag, moveNo))
+		tag_count += 1
+	
+	last_tag = 'tag' + str(tag_count - 1)
+	gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
+	# print(last_tag)
 	gameNotaion.see(tk.END)
 	gameNotaion.configure(state='disabled')
 
@@ -878,7 +912,7 @@ def updateNotation(piece, x, y, isAttacking, board):
 
 	currMoveNotation = getSAN(piece, x, y, isAttacking, board)
 
-	LAN += getLAN(piece, x, y, board)
+	LAN.append(getLAN(piece, x, y, board))
 	moveNotation.append(currMoveNotation)
 
 	changeGameNotation(moveNotation)
@@ -886,8 +920,8 @@ def updateNotation(piece, x, y, isAttacking, board):
 #moving of pieces
 def moveTo(x, y, board, static):
 	global movingPiece
-	global LAN
 	global analyzingMode
+	global moveNotation
 
 	for piece in (board.whitePieces if board.whitesMove else board.blackPieces):
 		if(piece.movingThisPiece is True):
@@ -924,7 +958,7 @@ def moveTo(x, y, board, static):
 					board.enpassant = False
 
 				#if enpassant set to False
-				if(not board.whitesMove):
+				if(board.whitesMove):
 					for piece in board.whitePieces:
 						if(piece.isTaken is False and isPawn(piece.letter)):
 							piece.canEnpassant = False
@@ -935,25 +969,26 @@ def moveTo(x, y, board, static):
 
 				#if castling
 				if(board.castlingShort):
-					board.whitesMove = not board.whitesMove
+					# board.whitesMove = not board.whitesMove
 					for piece in (board.whitePieces if board.whitesMove else board.blackPieces):
 						if(piece.letter == 'R' and piece.isRight is True):
 							piece.move(5,y, board)
 					board.castlingShort = False
 
 				if(board.castlingLong):
-					board.whitesMove = not board.whitesMove
+					# board.whitesMove = not board.whitesMove
 					for piece in (board.whitePieces if board.whitesMove else board.blackPieces):
 						if(piece.letter == 'R' and piece.isRight is False):
 							piece.move(3,y, board)
 					board.castlingLong = False
 
-				isGameOver(board, static)
-
 				if(static is False):
 					stopThread()
 					if(analyzingMode):
 						startThread()
+
+				board.whitesMove = not board.whitesMove
+				isGameOver(board, static)
 				return True
 			else:
 				piece.movingThisPiece = False
@@ -996,6 +1031,8 @@ def motionB1(event):
 def releaseB1(event):
 	global movingPiece
 	global curr_index
+	global curr_board
+	global last_tag
 	
 	if(movingPiece is None):
 		return
@@ -1004,6 +1041,16 @@ def releaseB1(event):
 	if(curr_board.flipped):
 		x = 7 - x
 		y = 7 - y
+
+	while(curr_index != len(moveNotation) - 1):
+		forward(True, moveNotation, curr_board, False)
+
+	try:
+		gameNotaion.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
+		last_tag = 'tag' + str(len(moveNotation)-1)
+		gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
+	except:
+		pass
 
 	if(movingPiece is not None):
 		movingPiece.movingThisPiece = True
@@ -1045,7 +1092,7 @@ def motionB3(event):
 
 	newX = x*pieceSize + startX + pieceSize/2
 	newY = y*pieceSize + startY + pieceSize/2
-	
+
 	arrows[-1] = displayBoard.create_line(lineX, lineY, newX, newY, width = 8, arrow=tk.LAST, arrowshape= (15, 15, 8), fill=color)
 
 def releaseB3(event):
@@ -1070,8 +1117,9 @@ def isPawn(a):
 	return False
 
 #move through gamenotation forward by 1 move
-def forward(static, moveNotation, board):
+def forward(static, moveNotation, board, fromBackward):
 	global curr_index
+	global last_tag
 	
 	curr_index += 1
 	if(curr_index >= len(moveNotation)):
@@ -1110,17 +1158,15 @@ def forward(static, moveNotation, board):
 				moving = True
 				curr_board.blackPieces[0].movingThisPiece = True
 				moveTo(2, 0, curr_board, static)
-		return
 
 	#pawn movement notation
-	if(n == 2):
+	elif(n == 2):
 		x = ord(notation[0]) - 97
 		y = 8 - int(notation[1])
 		for piece in (curr_board.whitePieces if curr_index % 2 == 0 else curr_board.blackPieces):
 			if(piece.letter == movingPieceLetter and piece.canMove(x, y, curr_board)):
 				piece.movingThisPiece = True
 				moveTo(x, y, curr_board, static)
-				return
 		
 	#normal piece movement notation
 	elif(n == 3):
@@ -1136,7 +1182,7 @@ def forward(static, moveNotation, board):
 			if(piece.letter == movingPieceLetter and piece.isTaken is False and piece.canMove(x, y, curr_board)):
 				piece.movingThisPiece = True
 				moveTo(x, y, curr_board, static)
-				return
+
 	#captures notation
 	elif(n == 4):
 		x = ord(notation[2]) - 97
@@ -1153,7 +1199,7 @@ def forward(static, moveNotation, board):
 							continue
 				piece.movingThisPiece = True
 				moveTo(x, y, curr_board, static)
-				return
+
 	#2 possible capture notation Raxe6
 	elif(n == 5):
 		x = ord(notation[3]) - 97
@@ -1168,16 +1214,25 @@ def forward(static, moveNotation, board):
 						continue
 				piece.movingThisPiece = True
 				moveTo(x, y, curr_board, static)
-				return
 
 	elif(notation == '1/2-1/2'):
 		myLabel.config(text="Game ended in a draw")
 		return
 
+	gameNotaion.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
+	last_tag = 'tag' + str(curr_index)
+	gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
+
+	if(not fromBackward):
+		stopThread()
+		if(analyzingMode):
+			startThread()
+
 #move through gamenotation backward by 1move
 def backward():
 	global curr_index
 	global curr_board
+	global last_tag
 
 	temp = curr_index - 1
 
@@ -1192,8 +1247,15 @@ def backward():
 
 	i = 0
 	while i <= temp:
-		forward(True, moveNotation, curr_board)
+		forward(True, moveNotation, curr_board, True)
 		i += 1
+
+	gameNotaion.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
+	last_tag = 'tag' + str(curr_index)
+	gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
+	stopThread()
+	if(analyzingMode):
+		startThread()
 	# curr_index = temp
 
 #new game
@@ -1213,7 +1275,7 @@ def new():
 	curr_index = -1
 	movingPiece = Pieces(0, 0, True)
 	moveNotation = []
-	LAN = ''
+	LAN = []
 	gameNotaion.configure(state='normal')
 	gameNotaion.delete(1.0, tk.END)
 	myLabel.config(text='')
@@ -1233,6 +1295,8 @@ def new():
 
 	circles.clear()
 
+	# evalBar(0)
+
 #flip the board
 def flip():
 	global curr_board
@@ -1243,9 +1307,10 @@ def flip():
 def initEngine():
 	global engine
 
-	engine = sb.Popen('D:\\CPP\\Chess\\stockfish12.exe', stdin=sb.PIPE, stdout=sb.PIPE, stderr=sb.STDOUT)
+	engine = sb.Popen('D:\\CPP\\Chess\\stockfish13.exe', stdin=sb.PIPE, stdout=sb.PIPE, stderr=sb.STDOUT)
 	put(b'uci\n', inf_list, 0, b'isready\n', 'readyok')
-	put(b'setoption name Multipv value 3\n', inf_list, 0, b'isready\n', 'readyok')
+	put(b'setoption name Hash value 128\n', inf_list, 0, b'isready\n', 'readyok')
+	# put(b'setoption name Multipv value 3\n', inf_list, 0, b'isready\n', 'readyok')
 	myLabel.config(text='Engine Loaded')
 
 #put commands to engine
@@ -1273,14 +1338,22 @@ def runAnalysis(LAN):
 	global inf_list
 	global myLabel
 	global engine
-	global analyzing
 	global curr_board
 	global againstAI
+	global evaluation
+	global last_tag
 
 	if(engine is None):
 		initEngine()
 
-	command = b'position startpos moves ' + LAN.encode() + b'\n'
+	lan = ''
+
+	if(last_tag):
+		cnt = int(last_tag[3:len(last_tag)])
+		if(cnt >= 0):
+			for each in range(cnt+1):
+				lan += LAN[each]
+	command = b'position startpos moves ' + lan.encode() + b'\n'
 	print(command)
 	engine.stdin.write(command)
 	engine.stdin.flush()
@@ -1308,9 +1381,9 @@ def runAnalysis(LAN):
 			if(not curr_board.whitesMove):
 				cp *= -1
 			if(text[8] == 'mate'):
-				score = ('+' if cp > 0 else '-') + 'M' + str(abs(cp)) + '\t'
+				score = ('+' if cp > 0 else '-') + 'M' + str(abs(cp))
 			else:
-				score = str(float(cp/100)) + '\t'
+				score = str(float(cp/100))
 			line = text[6]
 			clone_board = curr_board.clone()
 			againstAI = True
@@ -1321,15 +1394,17 @@ def runAnalysis(LAN):
 				if(len(each) == 4 or len(each) == 5):
 					if(isPawn(each[0]) and isPawn(each[2]) and (not each[1].isalpha() and int(each[1]) >= 1 and int(each[1]) <= 8) and (not each[3].isalpha() and int(each[3]) >= 1 and int(each[3]))):
 						cnt += 1
-						moveInSAN = LANtoSAN(each, clone_board, True)
+						try:
+							moveInSAN = LANtoSAN(each, clone_board, True)
+						except:
+							break
 						lineInfo += moveInSAN + ' '
 
-			againstAI = False
-			clone_board.destroy()
 			if(line == '1'):
 				depth1.config(text=depth)
 				score1.config(text=score)
 				line1.config(text=lineInfo)
+				evaluation = score
 			elif(line == '2'):
 				depth2.config(text=depth)
 				score2.config(text=score)
@@ -1339,10 +1414,9 @@ def runAnalysis(LAN):
 				score3.config(text=score)
 				line3.config(text=lineInfo)
 		except Exception as e:
-			traceback.print_exc()
-			print(text)
 			continue
 		finally:
+			clone_board.destroy()
 			againstAI = False
 
 def analysisMode():
@@ -1358,8 +1432,8 @@ def analysisMode():
 		analysisButton.config(relief='sunken')
 		startThread()
 	else:
-		analysisButton.config(relief='raised')
 		stopThread()
+		analysisButton.config(relief='raised')
 
 def startThread():
 	global LAN
@@ -1368,12 +1442,9 @@ def startThread():
 	analyzingThread = threading.Thread(target=runAnalysis, args=(LAN,), daemon=True)
 	analyzingThread.start()
 
-
 def stopThread():
 	global analyzingThread
-	global analyzing
 	global engine
-
 
 	if(analyzingThread is None):
 		return
@@ -1387,12 +1458,25 @@ def stopThread():
 		myLabel.config(text='◌')
 		root.update()
 
-	# if(analyzing):
-	# 	analyzing = not analyzing
-	# 	myLabel.config(text='◌')
-	# 	while analyzingThread.is_alive():
-	# 		root.update()
-	# 	analyzing = not analyzing
+	engine.stdin.write(b'isready\n')
+	engine.stdin.flush()
+
+	while True:
+		text = engine.stdout.readline().strip()
+		res = text.decode().split()
+		if len(res) > 0 and res[0] == 'readyok':
+			break
+
+	depth1.config(text='')
+	score1.config(text='')
+	line1.config(text='')
+	depth2.config(text='')
+	score2.config(text='')
+	line2.config(text='')
+	depth3.config(text='')
+	score3.config(text='')
+	line3.config(text='')
+	print("Stopped")
 
 #choose commands for engine
 def runEngine():
@@ -1400,25 +1484,44 @@ def runEngine():
 	global inf_list
 	global engine
 	global curr_board
+	global analyzingMode
+	global last_tag
+	global evaluation
 
-	# if isGameOver():
-	# 	return
+	if isGameOver(curr_board, True) or analyzingMode:
+		return
 	if engine is None:
 		initEngine()
 	inf_list.clear()
 
-	command = b'position startpos moves ' + LAN.encode() + b'\n'
+	lan = ''
+
+	if(last_tag):
+		cnt = int(last_tag[3:len(last_tag)])
+		if(cnt >= 0):
+			for each in range(cnt+1):
+				lan += LAN[each]
+	command = b'position startpos moves ' + lan.encode() + b'\n'
 	put(command, inf_list, 0, b'isready\n', 'readyok')
 
 	command = b'go\n'
 	put(command, inf_list, 2, b'stop\n', 'bestmove')
 
 	result = inf_list[-1].decode().split()
+	text = inf_list[-2].decode().split()
 	inf_list.clear()
 
 	move = ''
 	try:
 		move = LANtoSAN(result[1], curr_board, False)
+		cp = int(text[9])
+		if(curr_board.whitesMove):
+			cp *= -1
+		if(text[8] == 'mate'):
+			score = ('+' if cp > 0 else '-') + 'M' + str(abs(cp))
+		else:
+			score = str(float(cp/100))
+		evaluation = score
 	except:
 		for each in result:
 			if(len(each) == 4 or len(each) == 5):
@@ -1428,6 +1531,40 @@ def runEngine():
 	myLabel.config(text='Best Move: ' + move)
 	return move
 
+
+def evalBar():
+	global evalLines
+	global evaluation
+
+	# print(evaluation)
+	edge = 0
+	if(evaluation):
+		if(evaluation[1] == 'M'):
+			if(evaluation[0] == '+'):
+				edge = 200
+			else:
+				edge = -200
+		else:
+			edge = min(float(evaluation)*40, 180)
+			if(edge < -180):
+				edge = -180
+	# if()
+	for y in range(1, 400):
+		if(evalLines[y]):
+			displayBoard.delete(evalLines[y])
+		if(y == 0.5*400):
+			evalLines[y] = displayBoard.create_line(0, y, startX-5, y, width=5, fill=color)
+		elif(y == 0.125*400 or y == 0.25*400 or y == 0.375*400):
+			evalLines[y] = displayBoard.create_line(0, y, startX-5, y, width=1, fill='black')
+		elif(y == 0.625*400 or y == 0.75*400 or y == 0.875*400):
+			evalLines[y] = displayBoard.create_line(0, y, startX-5, y, width=1, fill='black')
+		elif(y < (0.5*400 - edge)): 
+			evalLines[y] = displayBoard.create_line(0, y, startX-5, y, fill='grey')
+		else: 
+			evalLines[y] = displayBoard.create_line(0, y, startX, y, fill='#FAEBD7')
+	root.after(500, evalBar)
+
+evalBar()
 #play against stockfish
 def play_computer():
 	global againstAI
@@ -1454,6 +1591,11 @@ def compMode(board):
 	global firstTime
 	global engine
 	global moveNotation
+	global analyzingMode
+
+	if(analyzingMode):
+		myLabel.config(text='Analysis cannot be done while playing againstAI')
+		return
 
 	if(not firstTime):
 		stopped = True
@@ -1466,14 +1608,14 @@ def compMode(board):
 
 	if(curr_index != len(moveNotation) - 1):
 		while(curr_index != len(moveNotation) - 1):
-			forward(True, moveNotation, board)
+			forward(True, moveNotation, board, True)
 
 	engineMoves=[]
 	for each in moveNotation:
 		engineMoves.append(each)
 	while not isGameOver(board, False) and not stopped:
 		engineMoves.append(runEngine())
-		forward(False, engineMoves, board)
+		forward(False, engineMoves, board, True)
 		root.update()
 
 	betweenEngine.config(relief='raised')
@@ -1579,14 +1721,8 @@ def loadPGN():
 		j = j+1
 
 	for each in move:
-		forward(False, move, curr_board)
+		forward(False, move, curr_board, True)
 
-	# curr_index = -1
-	# curr_board.destroy()
-	# curr_board = Board()
-	# curr_board.show()
-
-	# gameNotaion.see(1.0)
 	pgnText.delete(1.0, tk.END)
 	pgnText.insert(tk.END, "PGN Loaded\n")
 
@@ -1595,6 +1731,37 @@ curr_board.show()
 
 engine = None
 inf_list = []
+
+def callback(event, tag, moveNo):
+	global curr_index
+	global last_tag
+	global analyzingMode
+
+	index = event.widget.index("@%s,%s" % (event.x, event.y))
+	tag_indices = list(event.widget.tag_ranges(tag))
+
+	move = ''
+	for start, end in zip(tag_indices[0::2], tag_indices[1::2]):
+		if event.widget.compare(start, '<=', index) and event.widget.compare(index, '<', end):
+			move = event.widget.get(start, end)
+			move = move.strip().rstrip()
+			break
+
+	start = 0
+	index = -1
+	for each in range(len(moveNotation)):
+		if(each % 2 == 0):
+			start += 1
+		if(moveNotation[each] == move and start == moveNo):
+			index = each
+			break
+
+	# gameNotaion.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
+	# last_tag = tag
+	# gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
+	assert(index != -1)
+	curr_index = index + 1
+	backward()
 
 #Game Board
 mainFrame.grid(row=0, column=0)
@@ -1615,8 +1782,8 @@ gameNotaion.grid(row=0, column=1, sticky='nw', padx=padding, pady=padding)
 #DB, PGN and FEN
 addon = tk.Frame(root)
 addonButtons = tk.Frame(addon)
-dbInfo = tk.scrolledtext.ScrolledText(addon, state='disabled', width = 50, height = 15)
-pgnText = tk.scrolledtext.ScrolledText(addon, width=50, height = 5)
+dbInfo = tk.scrolledtext.ScrolledText(addon, state='disabled', width = 40, height = 15)
+pgnText = tk.scrolledtext.ScrolledText(addon, width=40, height = 5)
 searchDbButton = tk.Button(addon, text='Search DB', command=searchDB)
 loadPGN = tk.Button(addonButtons, text="Load PGN", command=loadPGN)
 generateFEN = tk.Button(addonButtons, text="Generate FEN", command=genFEN)
@@ -1637,7 +1804,7 @@ myLabel.grid(row=1, column=0)
 #Go through game
 arrowFrame = tk.Frame(root)
 backwardButton = tk.Button(arrowFrame, text="<-", command=backward)
-forwardButton = tk.Button(arrowFrame, text="->", command=lambda: forward(True, moveNotation, curr_board))
+forwardButton = tk.Button(arrowFrame, text="->", command=lambda: forward(True, moveNotation, curr_board, False))
 arrowFrame.grid(row=1, column=1)
 backwardButton.grid(row=1, column=0, padx=padding, pady=padding)
 forwardButton.grid(row=1, column=1, padx=padding, pady=padding)
