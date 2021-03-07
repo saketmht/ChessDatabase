@@ -46,28 +46,10 @@ analyzingMode = False
 curr_index = -1
 last_tag = ''
 
-myImg = ImageTk.PhotoImage(Image.open("board0.png").resize((pieceSize*8, pieceSize*8)))
-mainFrame = tk.Frame(root, bg='#A0522D')
-displayBoard = tk.Canvas(mainFrame, width=pieceSize*8 + startX, height=pieceSize*8 + startY)
-displayBoard.create_image(startX,startY, image=myImg, anchor="nw")
-
-rook_black = ImageTk.PhotoImage(Image.open("rook_black.png").resize((pieceSize, pieceSize)))
-king_black = ImageTk.PhotoImage(Image.open("king_black.png").resize((pieceSize, pieceSize)))
-queen_black = ImageTk.PhotoImage(Image.open("queen_black.png").resize((pieceSize, pieceSize)))
-bishop_black = ImageTk.PhotoImage(Image.open("bishop_black.png").resize((pieceSize, pieceSize)))
-knight_black = ImageTk.PhotoImage(Image.open("knight_black.png").resize((pieceSize, pieceSize)))
-pawn_black = ImageTk.PhotoImage(Image.open("pawn_black.png").resize((pieceSize, pieceSize)))
-
-pieces_black = [rook_black, king_black, queen_black, bishop_black, knight_black, pawn_black]
-
-rook_white = ImageTk.PhotoImage(Image.open("rook_white.png").resize((pieceSize, pieceSize)))
-king_white = ImageTk.PhotoImage(Image.open("king_white.png").resize((pieceSize, pieceSize)))
-queen_white = ImageTk.PhotoImage(Image.open("queen_white.png").resize((pieceSize, pieceSize)))
-bishop_white = ImageTk.PhotoImage(Image.open("bishop_white.png").resize((pieceSize, pieceSize)))
-knight_white = ImageTk.PhotoImage(Image.open("knight_white.png").resize((pieceSize, pieceSize)))
-pawn_white = ImageTk.PhotoImage(Image.open("pawn_white.png").resize((pieceSize, pieceSize)))
-
-pieces_white = [rook_white, king_white, queen_white, bishop_white, knight_white, pawn_white]
+boardFrame = None
+pieceImage = None
+curr_board = None
+gameNotation = None
 
 class Pieces:
 	def __init__(self, x, y, isWhite):
@@ -83,9 +65,9 @@ class Pieces:
 
 	def show(self, anchorPos= None, pixelPosX= None, pixelPosY= None):
 		if(self.image is not None):
-			displayBoard.delete(self.image)
+			boardFrame.canvas.delete(self.image)
 		if(not self.isTaken):
-			self.image= displayBoard.create_image(self.pixelPosX if pixelPosX is None else pixelPosX, self.pixelPosY if pixelPosY is None else pixelPosY, image=self.piece, anchor='nw' if anchorPos is None else anchorPos)
+			self.image= boardFrame.canvas.create_image(self.pixelPosX if pixelPosX is None else pixelPosX, self.pixelPosY if pixelPosY is None else pixelPosY, image=self.piece, anchor='nw' if anchorPos is None else anchorPos)
 
 	def clone(self):
 		pass
@@ -147,7 +129,7 @@ class King(Pieces):
 	def __init__(self, x, y, isWhite):
 		super().__init__(x, y, isWhite)
 		self.letter = 'K'
-		self.piece = pieces_white[1] if self.isWhite else pieces_black[1] 
+		self.piece = pieceImage.pieces_white[1] if self.isWhite else pieceImage.pieces_black[1] 
 
 	def canMove(self, x, y, board):
 		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
@@ -204,7 +186,7 @@ class Rook(Pieces):
 		super().__init__(x, y, isWhite)
 		self.isRight = True if x == 7 else False
 		self.letter = 'R'
-		self.piece = pieces_white[0] if self.isWhite else pieces_black[0]
+		self.piece = pieceImage.pieces_white[0] if self.isWhite else pieceImage.pieces_black[0]
 
 	def canMove(self, x, y, board):
 		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
@@ -229,7 +211,7 @@ class Queen(Pieces):
 	def __init__(self, x, y, isWhite):
 		super().__init__(x, y, isWhite)
 		self.letter = 'Q'
-		self.piece = pieces_white[2] if self.isWhite else pieces_black[2]
+		self.piece = pieceImage.pieces_white[2] if self.isWhite else pieceImage.pieces_black[2]
 
 	def canMove(self, x, y, board):
 		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
@@ -258,7 +240,7 @@ class Bishop(Pieces):
 	def __init__(self, x, y, isWhite):
 		super().__init__(x, y, isWhite)
 		self.letter = 'B'
-		self.piece = pieces_white[3] if self.isWhite else pieces_black[3]
+		self.piece = pieceImage.pieces_white[3] if self.isWhite else pieceImage.pieces_black[3]
 
 	def canMove(self, x, y, board):
 		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
@@ -283,7 +265,7 @@ class Knight(Pieces):
 	def __init__(self, x, y, isWhite):
 		super().__init__(x, y, isWhite)
 		self.letter = 'N'
-		self.piece = pieces_white[4] if self.isWhite else pieces_black[4]
+		self.piece = pieceImage.pieces_white[4] if self.isWhite else pieceImage.pieces_black[4]
 
 	def canMove(self, x, y, board):
 		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
@@ -306,7 +288,7 @@ class Pawn(Pieces):
 	def __init__(self, x, y, isWhite):
 		super().__init__(x, y, isWhite)
 		self.letter = chr(ord('a') + x)
-		self.piece = pieces_white[5] if self.isWhite else pieces_black[5]
+		self.piece = pieceImage.pieces_white[5] if self.isWhite else pieceImage.pieces_black[5]
 		self.canEnpassant = False
 		self.enpassant = Pieces(0, 0, True)
 
@@ -654,7 +636,7 @@ def isGameOver(board, static):
 				result = '1/2-1/2'
 
 			moveNotation.append(result)
-			changeGameNotation(moveNotation)
+			gameNotation.changeGameNotation(moveNotation)
 
 		for piece in board.whitePieces:
 			piece.isTaken = True
@@ -864,46 +846,6 @@ def LANtoSAN(move, board, static):
 	return ret
 
 #fix notations
-def changeGameNotation(moveNotation):
-	global gameNotaion
-	global last_tag
-
-	allmoves = ''
-	moveNo = 1
-	tag_count = 0
-	gameNotaion.configure(state='normal')
-	gameNotaion.delete(1.0, tk.END)
-
-	for tag in gameNotaion.tag_names():
-		gameNotaion.tag_delete(tag)
-
-	for move in range(len(moveNotation)):
-		allmoves = ''
-		if(move % 2 == 0):
-			if(moveNotation[move] != '1-0' and moveNotation[move] != '0-1' and moveNotation[move] != '1/2-1/2'):
-				allmoves += str(moveNo) + ('.  ' if moveNo <= 9 else '. ')
-			gameNotaion.insert(tk.END, allmoves)
-			moveNo += 1
-
-			allmoves = ''
-			curr_tag = 'tag' + str(tag_count)
-			left = 8 - len(moveNotation[move])
-			allmoves = moveNotation[move]
-			gameNotaion.insert(tk.END, allmoves, curr_tag)
-			gameNotaion.insert(tk.END, (' ' * left))
-		else:
-			allmoves = moveNotation[move] + '\n'
-			curr_tag = 'tag' + str(tag_count)
-			gameNotaion.insert(tk.END, allmoves, curr_tag)
-
-		gameNotaion.tag_bind(curr_tag, "<Button-1>", lambda event, tag = curr_tag, moveNo=moveNo-1: callback(event, tag, moveNo))
-		tag_count += 1
-	
-	last_tag = 'tag' + str(tag_count - 1)
-	gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
-	# print(last_tag)
-	gameNotaion.see(tk.END)
-	gameNotaion.configure(state='disabled')
 
 #update notations per move
 def updateNotation(piece, x, y, isAttacking, board):
@@ -915,7 +857,7 @@ def updateNotation(piece, x, y, isAttacking, board):
 	LAN.append(getLAN(piece, x, y, board))
 	moveNotation.append(currMoveNotation)
 
-	changeGameNotation(moveNotation)
+	gameNotation.changeGameNotation(moveNotation)
 
 #moving of pieces
 def moveTo(x, y, board, static):
@@ -1001,10 +943,10 @@ def moveB1(event):
 	global arrows
 
 	for each in arrows:
-		displayBoard.delete(each)
+		boardFrame.canvas.delete(each)
 
 	for each in circles:
-		displayBoard.delete(each)
+		boardFrame.canvas.delete(each)
 	arrows.clear()
 	circles.clear()
 	x = math.floor((event.x - startX)/pieceSize)
@@ -1046,9 +988,9 @@ def releaseB1(event):
 		forward(True, moveNotation, curr_board, False)
 
 	try:
-		gameNotaion.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
+		gameNotation.scrolledtext.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
 		last_tag = 'tag' + str(len(moveNotation)-1)
-		gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
+		gameNotation.scrolledtext.tag_config(last_tag, foreground="black", background='#ADD8E6', font=('bold'))
 	except:
 		pass
 
@@ -1085,7 +1027,7 @@ def moveB3(event):
 
 def motionB3(event):
 	if(arrows[-1]):
-		displayBoard.delete(arrows[-1])
+		boardFrame.canvas.delete(arrows[-1])
 
 	x = math.floor((event.x - startX)/pieceSize)
 	y = math.floor((event.y - startY)/pieceSize)
@@ -1093,11 +1035,11 @@ def motionB3(event):
 	newX = x*pieceSize + startX + pieceSize/2
 	newY = y*pieceSize + startY + pieceSize/2
 
-	arrows[-1] = displayBoard.create_line(lineX, lineY, newX, newY, width = 8, arrow=tk.LAST, arrowshape= (15, 15, 8), fill=color)
+	arrows[-1] = boardFrame.canvas.create_line(lineX, lineY, newX, newY, width = 8, arrow=tk.LAST, arrowshape= (15, 15, 8), fill=color)
 
 def releaseB3(event):
 	if(arrows[-1]):
-		displayBoard.delete(arrows[-1])
+		boardFrame.canvas.delete(arrows[-1])
 
 	x = math.floor((event.x - startX)/pieceSize)
 	y = math.floor((event.y - startY)/pieceSize)
@@ -1105,10 +1047,10 @@ def releaseB3(event):
 	newX = x*pieceSize + startX + pieceSize/2
 	newY = y*pieceSize + startY + pieceSize/2
 
-	arrows[-1] = displayBoard.create_line(lineX, lineY, newX, newY, width = 10, arrow=tk.LAST, arrowshape= (15, 15, 8), fill=color)
+	arrows[-1] = boardFrame.canvas.create_line(lineX, lineY, newX, newY, width = 10, arrow=tk.LAST, arrowshape= (15, 15, 8), fill=color)
 	
 	if(newX == lineX and newY == lineY):
-		circles.append(create_circle(newX, newY, pieceSize/2, displayBoard))
+		circles.append(create_circle(newX, newY, pieceSize/2, boardFrame.canvas))
 
 #check if letter betwn a-h
 def isPawn(a):
@@ -1219,9 +1161,9 @@ def forward(static, moveNotation, board, fromBackward):
 		myLabel.config(text="Game ended in a draw")
 		return
 
-	gameNotaion.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
+	gameNotation.scrolledtext.tag_config(last_tag, foreground='black', background='white', font=('consolas', '12', 'normal')) 
 	last_tag = 'tag' + str(curr_index)
-	gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
+	gameNotation.scrolledtext.tag_config(last_tag, foreground="black", background='#ADD8E6', font=('bold'))
 
 	if(not fromBackward):
 		stopThread()
@@ -1250,9 +1192,9 @@ def backward():
 		forward(True, moveNotation, curr_board, True)
 		i += 1
 
-	gameNotaion.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
+	gameNotation.scrolledtext.tag_config(last_tag, foreground='black', background='white', font=('consolas', '12', 'normal')) 
 	last_tag = 'tag' + str(curr_index)
-	gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
+	gameNotation.scrolledtext.tag_config(last_tag, foreground="black", background='#ADD8E6', font=('bold'))
 	stopThread()
 	if(analyzingMode):
 		startThread()
@@ -1273,11 +1215,11 @@ def new():
 	curr_board = Board()
 	curr_board.show()
 	curr_index = -1
-	movingPiece = Pieces(0, 0, True)
+	movingPiece = None
 	moveNotation = []
 	LAN = []
-	gameNotaion.configure(state='normal')
-	gameNotaion.delete(1.0, tk.END)
+	gameNotation.scrolledtext.configure(state='normal')
+	gameNotation.scrolledtext.delete(1.0, tk.END)
 	myLabel.config(text='')
 	playComputerButton.config(text='Play Computer')
 	againstAI = False
@@ -1286,12 +1228,12 @@ def new():
 		startThread()
 
 	for each in arrows:
-		displayBoard.delete(each)
+		boardFrame.canvas.delete(each)
 
 	arrows.clear()
 
 	for each in circles:
-		displayBoard.delete(each)
+		boardFrame.canvas.delete(each)
 
 	circles.clear()
 
@@ -1310,7 +1252,7 @@ def initEngine():
 	engine = sb.Popen('D:\\CPP\\Chess\\stockfish13.exe', stdin=sb.PIPE, stdout=sb.PIPE, stderr=sb.STDOUT)
 	put(b'uci\n', inf_list, 0, b'isready\n', 'readyok')
 	put(b'setoption name Hash value 128\n', inf_list, 0, b'isready\n', 'readyok')
-	# put(b'setoption name Multipv value 3\n', inf_list, 0, b'isready\n', 'readyok')
+	put(b'setoption name Multipv value 3\n', inf_list, 0, b'isready\n', 'readyok')
 	myLabel.config(text='Engine Loaded')
 
 #put commands to engine
@@ -1515,7 +1457,7 @@ def runEngine():
 	try:
 		move = LANtoSAN(result[1], curr_board, False)
 		cp = int(text[9])
-		if(curr_board.whitesMove):
+		if(not curr_board.whitesMove):
 			cp *= -1
 		if(text[8] == 'mate'):
 			score = ('+' if cp > 0 else '-') + 'M' + str(abs(cp))
@@ -1551,20 +1493,19 @@ def evalBar():
 	# if()
 	for y in range(1, 400):
 		if(evalLines[y]):
-			displayBoard.delete(evalLines[y])
+			boardFrame.canvas.delete(evalLines[y])
 		if(y == 0.5*400):
-			evalLines[y] = displayBoard.create_line(0, y, startX-5, y, width=5, fill=color)
+			evalLines[y] = boardFrame.canvas.create_line(0, y, startX-5, y, width=5, fill=color)
 		elif(y == 0.125*400 or y == 0.25*400 or y == 0.375*400):
-			evalLines[y] = displayBoard.create_line(0, y, startX-5, y, width=1, fill='black')
+			evalLines[y] = boardFrame.canvas.create_line(0, y, startX-5, y, width=1, fill='black')
 		elif(y == 0.625*400 or y == 0.75*400 or y == 0.875*400):
-			evalLines[y] = displayBoard.create_line(0, y, startX-5, y, width=1, fill='black')
+			evalLines[y] = boardFrame.canvas.create_line(0, y, startX-5, y, width=1, fill='black')
 		elif(y < (0.5*400 - edge)): 
-			evalLines[y] = displayBoard.create_line(0, y, startX-5, y, fill='grey')
+			evalLines[y] = boardFrame.canvas.create_line(0, y, startX-5, y, fill='grey')
 		else: 
-			evalLines[y] = displayBoard.create_line(0, y, startX, y, fill='#FAEBD7')
-	root.after(500, evalBar)
+			evalLines[y] = boardFrame.canvas.create_line(0, y, startX, y, fill='#FAEBD7')
+	root.after(100, evalBar)
 
-evalBar()
 #play against stockfish
 def play_computer():
 	global againstAI
@@ -1630,16 +1571,16 @@ def popup_bonus(piece, x, y, whitesMove, board):
 	promotionWin.geometry("%dx%d+%d+%d" % (220, 60, pieceSize, pieceSize if whitesMove else pieceSize*7))
 	promotionWin.overrideredirect(True) 
 
-	rook = tk.Label(promotionWin, image=pieces_white[0] if whitesMove else pieces_black[0], anchor='nw')
+	rook = tk.Label(promotionWin, image=pieceImage.pieces_white[0] if whitesMove else pieceImage.pieces_black[0], anchor='nw')
 	rook.grid(row=0, column=0)
 
-	queen = tk.Label(promotionWin, image=pieces_white[2] if whitesMove else pieces_black[2], anchor='nw')
+	queen = tk.Label(promotionWin, image=pieceImage.pieces_white[2] if whitesMove else pieceImage.pieces_black[2], anchor='nw')
 	queen.grid(row=0, column=1)
 
-	bishop = tk.Label(promotionWin, image=pieces_white[3] if whitesMove else pieces_black[3], anchor='nw')
+	bishop = tk.Label(promotionWin, image=pieceImage.pieces_white[3] if whitesMove else pieceImage.pieces_black[3], anchor='nw')
 	bishop.grid(row=0, column=2)
 
-	knight = tk.Label(promotionWin, image=pieces_white[4] if whitesMove else pieces_black[4], anchor='nw')
+	knight = tk.Label(promotionWin, image=pieceImage.pieces_white[4] if whitesMove else pieceImage.pieces_black[4], anchor='nw')
 	knight.grid(row=0, column=3)
 
 	rook.bind("<Button-1>",lambda event, piece=piece, x=x, y=y, which="R", board=board : promoteTo(event, piece, which, x, y, board))
@@ -1708,7 +1649,10 @@ def loadPGN():
 	length = len(moves)
 	moveNo = 1
 	j = 0
-	while j < length: 
+	while j < length:
+		if(moves[j] == '{'):
+			while(moves[j] != '}'):
+				j += 1 
 		if(moves[j] == (str(moveNo) + '.')): 
 			turn = ""
 			try:
@@ -1725,9 +1669,6 @@ def loadPGN():
 
 	pgnText.delete(1.0, tk.END)
 	pgnText.insert(tk.END, "PGN Loaded\n")
-
-curr_board = Board()
-curr_board.show()
 
 engine = None
 inf_list = []
@@ -1756,28 +1697,133 @@ def callback(event, tag, moveNo):
 			index = each
 			break
 
-	# gameNotaion.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
+	# gameNotation.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
 	# last_tag = tag
-	# gameNotaion.tag_config(last_tag, foreground="blue", font=('bold'))
+	# gameNotation.tag_config(last_tag, foreground="blue", font=('bold'))
 	assert(index != -1)
 	curr_index = index + 1
 	backward()
 
-#Game Board
-mainFrame.grid(row=0, column=0)
-displayBoard.grid(row=0, column=0, padx=padding, pady=padding)
-#Drag and drop pieces
-displayBoard.bind('<Button-1>', moveB1)
-displayBoard.bind('<B1-Motion>', motionB1)
-displayBoard.bind('<ButtonRelease-1>', releaseB1)
-displayBoard.bind('<Button-3>', moveB3)
-displayBoard.bind('<B3-Motion>', motionB3)
-displayBoard.bind('<ButtonRelease-3>', releaseB3)
+# root.update()
+# bgImg = 
+# backgroundLabel = tk.Label(root, image=bgImg)
+# backgroundLabel.grid(row=0, column=0)
+
+# class MainFrame():
+# 	def __init__(self, master):
+# 		self.master = master
+# 		self.frame = tk.Frame(self.master)
+# 		self.backgroundLabel = tk.Label(self.frame, image = pieceImage.backgroundImage)
+# 		self.place()
+
+# 	def place(self):
+# 		self.frame.grid(row=0, column=0,sticky='nw')
+# 		self.backgroundLabel.grid(row=0, column=0)
+
+class BoardFrame:
+	def __init__(self, master):
+		self.master = master
+		self.frame = tk.Frame(self.master, bg='#A0522D')
+		self.canvas = tk.Canvas(self.frame, width=pieceSize*8 + startX, height=pieceSize*8 + startY)
+		self.init_canvas()
+		self.place()
+
+	def init_canvas(self):
+		self.canvas.create_image(startX,startY, image=pieceImage.boardImage, anchor="nw")
+		self.canvas.bind('<Button-1>', moveB1)
+		self.canvas.bind('<B1-Motion>', motionB1)
+		self.canvas.bind('<ButtonRelease-1>', releaseB1)
+		self.canvas.bind('<Button-3>', moveB3)
+		self.canvas.bind('<B3-Motion>', motionB3)
+		self.canvas.bind('<ButtonRelease-3>', releaseB3)
+
+	def place(self):
+		# self.frame.lift()
+		self.frame.grid(row=0, column=0)
+		self.canvas.grid(row=0, column=0, padx=padding, pady=padding)
+
+class PieceImage:
+	def __init__(self, master):
+		self.master = master
+		self.backgroundImage = ImageTk.PhotoImage(Image.open("101403-0.161844ff.jpg").resize((self.master.winfo_width(), self.master.winfo_height())))
+		self.boardImage = ImageTk.PhotoImage(Image.open("board0.png").resize((pieceSize*8, pieceSize*8)))
+		self.pieces_black = []
+		self.pieces_white = []
+		self.initBlackPieces()
+		self.initWhitePieces()
+
+	def initBlackPieces(self):
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("rook_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("king_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("queen_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("bishop_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("knight_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("pawn_black.png").resize((pieceSize, pieceSize))))
+
+	def initWhitePieces(self):
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("rook_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("king_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("queen_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("bishop_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("knight_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("pawn_white.png").resize((pieceSize, pieceSize))))
 
 #Move List
-gameNotaion = tk.scrolledtext.ScrolledText(root, state='disabled', width = 20, height=21)
-gameNotaion['font'] = ('consolas', '12')
-gameNotaion.grid(row=0, column=1, sticky='nw', padx=padding, pady=padding)
+class GameNotation():
+	def __init__(self, master):
+		self.master = master
+		self.frame = tk.Frame(self.master)
+		self.scrolledtext = tk.scrolledtext.ScrolledText(self.frame, state='disabled', width = 20, height=21, bg='#DCDCDC')
+		self.scrolledtext['font'] = ('consolas', '12')
+		self.place()
+
+	def place(self):
+		self.frame.grid(row=0, column=1)
+		self.scrolledtext.grid(row=0, column=0, sticky='nw', padx=padding, pady=padding)
+
+	def changeGameNotation(self, moveNotation):
+		global last_tag
+
+		allmoves = ''
+		moveNo = 1
+		tag_count = 0
+		self.scrolledtext.configure(state='normal')
+		self.scrolledtext.delete(1.0, tk.END)
+
+		for tag in self.scrolledtext.tag_names():
+			self.scrolledtext.tag_delete(tag)
+
+		for move in range(len(moveNotation)):
+			allmoves = ''
+			if(move % 2 == 0):
+				if(moveNotation[move] != '1-0' and moveNotation[move] != '0-1' and moveNotation[move] != '1/2-1/2'):
+					allmoves += str(moveNo) + ('.  ' if moveNo <= 9 else '. ')
+				self.scrolledtext.insert(tk.END, allmoves)
+				moveNo += 1
+
+				allmoves = ''
+				curr_tag = 'tag' + str(tag_count)
+				left = 8 - len(moveNotation[move])
+				allmoves = moveNotation[move]
+				self.scrolledtext.insert(tk.END, allmoves, curr_tag)
+				self.scrolledtext.insert(tk.END, (' ' * left))
+			else:
+				allmoves = moveNotation[move]
+				curr_tag = 'tag' + str(tag_count)
+				self.scrolledtext.insert(tk.END, allmoves, curr_tag)
+				self.scrolledtext.insert(tk.END, '\n')
+
+			self.scrolledtext.tag_bind(curr_tag, "<Button-1>", lambda event, tag = curr_tag, moveNo=moveNo-1: callback(event, tag, moveNo))
+			tag_count += 1
+		
+		last_tag = 'tag' + str(tag_count - 1)
+		self.scrolledtext.tag_config(last_tag, foreground="black", background='#ADD8E6', font=('bold'))
+		self.scrolledtext.see(tk.END)
+		self.scrolledtext.configure(state='disabled')
+
+# gameNotation = 
+# gameNotation
+# gameNotation
 
 #DB, PGN and FEN
 addon = tk.Frame(root)
@@ -1853,4 +1899,12 @@ line1.grid(row=1, column=3)
 line2.grid(row=2, column=3)
 line3.grid(row=3, column=3)
 
-root.mainloop()
+if __name__ == "__main__":
+	pieceImage = PieceImage(root)
+	# mainFrame = MainFrame(root)
+	boardFrame = BoardFrame(root)
+	evalBar()
+	gameNotation = GameNotation(root)
+	curr_board = Board()
+	curr_board.show()
+	root.mainloop()
