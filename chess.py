@@ -7,10 +7,15 @@ import time
 import json
 import threading
 import traceback
+import os
+
+from frame import PieceImage, BoardFrame, GameNotation, AddOn, EngineEvals
+from pieces import *
 
 root = tk.Tk()
-# root.state('normal')
-root.state('zoomed')
+root.title('Chess')
+root.state('normal')
+# root.state('zoomed')
 # root.configure(background='grey')
 
 #Fixed values
@@ -44,449 +49,16 @@ analyzingThread = None
 analyzingMode = False
 
 curr_index = -1
-last_tag = ''
+# last_tag = ''
 
 boardFrame = None
 pieceImage = None
 curr_board = None
 gameNotation = None
-
-class Pieces:
-	def __init__(self, x, y, isWhite):
-		self.matrixX = x
-		self.matrixY = y
-		self.pixelPosX = x*pieceSize + startX
-		self.pixelPosY = y*pieceSize + startY
-		self.image = None
-		self.isWhite = isWhite
-		self.isTaken = False
-		self.movingThisPiece = False
-		self.hasMoved = False
-
-	def show(self, anchorPos= None, pixelPosX= None, pixelPosY= None):
-		if(self.image is not None):
-			boardFrame.canvas.delete(self.image)
-		if(not self.isTaken):
-			self.image= boardFrame.canvas.create_image(self.pixelPosX if pixelPosX is None else pixelPosX, self.pixelPosY if pixelPosY is None else pixelPosY, image=self.piece, anchor='nw' if anchorPos is None else anchorPos)
-
-	def clone(self):
-		pass
-
-	@staticmethod
-	def withInBounds(x, y):
-		if(x >= 0 and x < 8 and y >= 0 and y < 8):
-			return True
-		return False
-
-	def move(self, x, y, board):
-		self.hasMoved = True
-
-		self.matrixX = x
-		self.matrixY = y
-
-		if(not board.flipped):
-			self.pixelPosX = x*pieceSize + startX
-			self.pixelPosY = y*pieceSize + startY
-		else:
-			self.pixelPosX = (7 - x)*pieceSize + startX
-			self.pixelPosY = (7 - y)*pieceSize + startY
-
-		self.show()
-		self.movingThisPiece = False
-
-	def attackingAllies(self, x, y, board):
-		attacking = board.getPieceAt(x, y)
-		if(attacking is not None):
-			if(attacking.isWhite == self.isWhite):
-				return True
-		return False
-
-	def moveThroughPieces(self, x, y, board):
-
-		stepDirectionX = x - self.matrixX
-		if(stepDirectionX > 0):
-			stepDirectionX = 1
-		elif(stepDirectionX < 0):
-			stepDirectionX = -1
-		stepDirectionY = y - self.matrixY
-		if(stepDirectionY > 0):
-			stepDirectionY = 1
-		elif(stepDirectionY < 0):
-			stepDirectionY = -1
-		tempPosX = self.matrixX 
-		tempPosY = self.matrixY
-		tempPosX += stepDirectionX
-		tempPosY += stepDirectionY
-		while(tempPosX != x or tempPosY != y):
-			if(board.getPieceAt(tempPosX, tempPosY) is not None):
-				return True
-			tempPosX += stepDirectionX
-			tempPosY += stepDirectionY
-
-		return False
-
-class King(Pieces):
-	def __init__(self, x, y, isWhite):
-		super().__init__(x, y, isWhite)
-		self.letter = 'K'
-		self.piece = pieceImage.pieces_white[1] if self.isWhite else pieceImage.pieces_black[1] 
-
-	def canMove(self, x, y, board):
-		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
-			return False
-		if(abs(x - self.matrixX) == 0 and abs(y - self.matrixY) == 0):
-			return False
-		if(abs(x - self.matrixX) <= 1 and abs(y - self.matrixY) <= 1):
-			return True
-		#castling
-		if(self.canCastleShort(x, y, board)):
-			board.castlingShort = True
-			return True
-		if(self.canCastleLong(x, y, board)):
-			board.castlingLong = True
-			return True
-		return False
-
-	def canCastleShort(self, x, y, board):
-		if(not self.hasMoved and (y - self.matrixY) == 0) and (abs(x - self.matrixX <= 2)):
-			if(x - self.matrixX == 2):
-				#shortcastle
-				tempY = 7 if self.isWhite else 0
-				for piece in board.blackPieces if self.isWhite else board.whitePieces:
-					if(not piece.isTaken and (piece.canMove(5, tempY, board) or piece.canMove(6, tempY, board) or board.isPieceAt(5, tempY))):
-						return False
-				for piece in board.whitePieces if self.isWhite else board.blackPieces:
-					if(not piece.isTaken and piece.letter == 'R' and (piece.matrixX == 7 and (piece.matrixY == 7 if self.isWhite else piece.matrixY == 0)) and piece.hasMoved is False):
-						return True		
-		return False
-
-	def canCastleLong(self, x, y, board):
-		if(not self.hasMoved and (y - self.matrixY) == 0) and (abs(x - self.matrixX <= 2)):
-			if(x - self.matrixX == -2):
-				#long castle
-				tempY = 7 if self.isWhite else 0
-				for piece in board.blackPieces if self.isWhite else board.whitePieces:
-					if(not piece.isTaken and (piece.canMove(2, tempY, board) or piece.canMove(3, tempY, board) or board.isPieceAt(3, tempY))):
-						return False
-				for piece in board.whitePieces if self.isWhite else board.blackPieces:
-					if(not piece.isTaken and piece.letter == 'R' and (piece.matrixX == 0 and (piece.matrixY == 7 if self.isWhite else piece.matrixY == 0)) and piece.hasMoved is False):
-						return True		
-		return False
-
-	def clone(self):
-		cloneObj = King(self.matrixX, self.matrixY, self.isWhite)
-		cloneObj.isTaken = self.isTaken
-		cloneObj.piece = None
-		cloneObj.movingThisPiece = self.movingThisPiece
-		cloneObj.hasMoved = self.hasMoved
-		return cloneObj
-
-class Rook(Pieces):
-	def __init__(self, x, y, isWhite):
-		super().__init__(x, y, isWhite)
-		self.isRight = True if x == 7 else False
-		self.letter = 'R'
-		self.piece = pieceImage.pieces_white[0] if self.isWhite else pieceImage.pieces_black[0]
-
-	def canMove(self, x, y, board):
-		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
-			return False
-		if(abs(x - self.matrixX) == 0 and abs(y - self.matrixY) == 0):
-			return False
-		if(x == self.matrixX or y == self.matrixY):
-			if(self.moveThroughPieces(x, y, board)):
-				return False
-			return True
-		return False
-
-	def clone(self):
-		cloneObj = Rook(self.matrixX, self.matrixY, self.isWhite)
-		cloneObj.isTaken = self.isTaken
-		cloneObj.piece = None
-		cloneObj.movingThisPiece = self.movingThisPiece
-		cloneObj.hasMoved = self.hasMoved
-		return cloneObj
-
-class Queen(Pieces):
-	def __init__(self, x, y, isWhite):
-		super().__init__(x, y, isWhite)
-		self.letter = 'Q'
-		self.piece = pieceImage.pieces_white[2] if self.isWhite else pieceImage.pieces_black[2]
-
-	def canMove(self, x, y, board):
-		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
-			return False
-		if(abs(x - self.matrixX) == 0 and abs(y - self.matrixY) == 0):
-			return False
-		if(x == self.matrixX or y == self.matrixY):
-			if(self.moveThroughPieces(x, y, board)):
-				return False
-			return True
-		if(abs(x - self.matrixX) == abs(y - self.matrixY)):
-			if(self.moveThroughPieces(x, y, board)):
-				return False
-			return True
-		return False
-
-	def clone(self):
-		cloneObj = Queen(self.matrixX, self.matrixY, self.isWhite)
-		cloneObj.isTaken = self.isTaken
-		cloneObj.piece = None
-		cloneObj.hasMoved = self.hasMoved
-		cloneObj.movingThisPiece = self.movingThisPiece
-		return cloneObj
-
-class Bishop(Pieces):
-	def __init__(self, x, y, isWhite):
-		super().__init__(x, y, isWhite)
-		self.letter = 'B'
-		self.piece = pieceImage.pieces_white[3] if self.isWhite else pieceImage.pieces_black[3]
-
-	def canMove(self, x, y, board):
-		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
-			return False
-		if(abs(x - self.matrixX) == 0 and abs(y - self.matrixY) == 0):
-			return False
-		if(abs(x - self.matrixX) == abs(y - self.matrixY)):
-			if(self.moveThroughPieces(x, y, board)):
-				return False
-			return True
-		return False
-
-	def clone(self):
-		cloneObj = Bishop(self.matrixX, self.matrixY, self.isWhite)
-		cloneObj.isTaken = self.isTaken
-		cloneObj.piece = None
-		cloneObj.hasMoved = self.hasMoved
-		cloneObj.movingThisPiece = self.movingThisPiece
-		return cloneObj
-
-class Knight(Pieces):
-	def __init__(self, x, y, isWhite):
-		super().__init__(x, y, isWhite)
-		self.letter = 'N'
-		self.piece = pieceImage.pieces_white[4] if self.isWhite else pieceImage.pieces_black[4]
-
-	def canMove(self, x, y, board):
-		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
-			return False
-		if(abs(x - self.matrixX) == 0 and abs(y - self.matrixY) == 0):
-			return False
-		if((abs(x - self.matrixX) == 2 and abs(y - self.matrixY) == 1) or (abs(x - self.matrixX) == 1 and abs(y - self.matrixY) == 2)):
-			return True
-		return False
-
-	def clone(self):
-		cloneObj = Knight(self.matrixX, self.matrixY, self.isWhite)
-		cloneObj.isTaken = self.isTaken
-		cloneObj.piece = None
-		cloneObj.movingThisPiece = self.movingThisPiece
-		cloneObj.hasMoved = self.hasMoved
-		return cloneObj
-
-class Pawn(Pieces):
-	def __init__(self, x, y, isWhite):
-		super().__init__(x, y, isWhite)
-		self.letter = chr(ord('a') + x)
-		self.piece = pieceImage.pieces_white[5] if self.isWhite else pieceImage.pieces_black[5]
-		self.canEnpassant = False
-		self.enpassant = Pieces(0, 0, True)
-
-	def canMove(self, x, y, board):
-		# global enpassant
-
-		if(not self.withInBounds(x, y) or self.attackingAllies(x, y, board) or self.isTaken):
-			return False
-		if(abs(x - self.matrixX) == 0 and abs(y - self.matrixY) == 0):
-			return False
-
-		#enpassant on white's turn
-		if(self.canEnpassant is True):
-			if(self.isWhite):
-				if(y == (self.enpassant.matrixY - 1) and x == self.enpassant.matrixX):
-					board.enpassant = True
-					return True
-			else:
-				if(y == (self.enpassant.matrixY + 1) and x == self.enpassant.matrixX):
-					board.enpassant = True
-					return True
-
-		attacking = board.getPieceAt(x, y)
-		if(attacking is not None):
-			if(abs(x - self.matrixX) == abs(y - self.matrixY) and ((self.isWhite is True and (y - self.matrixY) == -1) or (self.isWhite is False and (y - self.matrixY) == 1))):
-				return True
-			return False
-		if(x != self.matrixX or y == self.matrixY):
-			return False
-
-		if((self.isWhite and (y - self.matrixY == -1)) or (not self.isWhite and (y - self.matrixY == 1))):
-			return True
-
-		if(not self.hasMoved and ((self.isWhite and (y - self.matrixY == -2)) or (not self.isWhite and (y - self.matrixY == 2)))):
-			if(self.moveThroughPieces(x, y, board)):
-				return False
-			if(self.isWhite):
-				for piece in board.blackPieces:
-					if(piece.isTaken is False and isPawn(piece.letter) and piece.matrixY == 4 and abs(ord(self.letter) - ord(piece.letter)) == 1):
-						piece.canEnpassant = True
-						piece.enpassant = self
-			else:
-				for piece in board.whitePieces:
-					if(piece.isTaken is False and isPawn(piece.letter) and piece.matrixY == 3 and abs(ord(self.letter) - ord(piece.letter)) == 1):
-						piece.canEnpassant = True
-						piece.enpassant = self
-			return True
-		return False
-
-	def clone(self):
-		cloneObj = Pawn(self.matrixX, self.matrixY, self.isWhite)
-		cloneObj.isTaken = self.isTaken
-		cloneObj.piece = None
-		cloneObj.movingThisPiece = self.movingThisPiece
-		cloneObj.hasMoved = self.hasMoved
-		cloneObj.canEnpassant = self.canEnpassant
-		cloneObj.enpassant = self.enpassant
-		return cloneObj
-
-class Board:
-	def __init__(self):
-		self.whitePieces = []
-		self.blackPieces = []
-		self.castlingShort = False
-		self.castlingLong = False
-		self.flipped = False
-		self.whitesMove = True
-		self.promotion = False
-		self.autoPromote = False
-		self.promotionTo = ''
-		self.enpassant = False
-		self.isClone = False
-		self.setUpBoard()
-
-	def setUpBoard(self):
-		self.whitePieces.append(King(4, 7, True))
-		self.whitePieces.append(Queen(3, 7, True))
-		self.whitePieces.append(Bishop(2, 7, True))
-		self.whitePieces.append(Bishop(5, 7, True))
-		self.whitePieces.append(Knight(1, 7, True))
-		self.whitePieces.append(Rook(0, 7, True))
-		self.whitePieces.append(Knight(6, 7, True))
-		self.whitePieces.append(Rook(7, 7, True))
-
-		self.whitePieces.append(Pawn(4, 6, True))
-		self.whitePieces.append(Pawn(3, 6, True))
-		self.whitePieces.append(Pawn(2, 6, True))
-		self.whitePieces.append(Pawn(5, 6, True))
-		self.whitePieces.append(Pawn(1, 6, True))
-		self.whitePieces.append(Pawn(0, 6, True))
-		self.whitePieces.append(Pawn(6, 6, True))
-		self.whitePieces.append(Pawn(7, 6, True))
-
-		self.blackPieces.append(King(4, 0, False))
-		self.blackPieces.append(Queen(3, 0, False))
-		self.blackPieces.append(Bishop(2, 0, False))
-		self.blackPieces.append(Bishop(5, 0, False))
-		self.blackPieces.append(Knight(1, 0, False))
-		self.blackPieces.append(Rook(0, 0, False))
-		self.blackPieces.append(Knight(6, 0, False))
-		self.blackPieces.append(Rook(7, 0, False))
-
-		self.blackPieces.append(Pawn(4, 1, False))
-		self.blackPieces.append(Pawn(3, 1, False))
-		self.blackPieces.append(Pawn(2, 1, False))
-		self.blackPieces.append(Pawn(5, 1, False))
-		self.blackPieces.append(Pawn(1, 1, False))
-		self.blackPieces.append(Pawn(0, 1, False))
-		self.blackPieces.append(Pawn(6, 1, False))
-		self.blackPieces.append(Pawn(7, 1, False))
-
-	def show(self):
-		for piece in self.whitePieces:
-			piece.show()
-
-		for piece in self.blackPieces:
-			piece.show()
+addon = None
+engineEval = None
 
 
-	def getPieceAt(self, x, y):
-		for piece in self.whitePieces:
-			if(not piece.isTaken and piece.matrixX == x and piece.matrixY == y):
-				return piece
-		for piece in self.blackPieces:
-			if(not piece.isTaken and piece.matrixX == x and piece.matrixY == y):
-				return piece
-		return None
-
-	def isPieceAt(self, x, y):
-		for piece in self.whitePieces:
-			if(not piece.isTaken and piece.matrixX == x and piece.matrixY == y):
-				return True
-		for piece in self.blackPieces:
-			if(not piece.isTaken and piece.matrixX == x and piece.matrixY == y):
-				return True
-		return False
-
-	def clone(self):
-		clone = Board()
-		clone.destroy()
-		n = len(self.whitePieces)
-
-		i = 0
-		while i < n:
-			clone.whitePieces.append(self.whitePieces[i].clone())
-			i += 1
-
-		n = len(self.blackPieces)
-		i = 0
-		while i < n:
-			clone.blackPieces.append(self.blackPieces[i].clone())
-			i += 1
-
-		clone.castlingShort = self.castlingShort
-		clone.castlingLong = self.castlingLong
-		clone.whitesMove = self.whitesMove
-		clone.enpassant = self.enpassant
-		clone.isClone = True
-		for each in clone.whitePieces if clone.whitesMove else clone.blackPieces:
-			if(isPawn(each.letter) and each.canEnpassant):
-				x = each.enpassant.matrixX
-				y = each.enpassant.matrixY 
-				for eachB in clone.blackPieces if clone.whitesMove else clone.whitePieces:
-					if(eachB.matrixX == x and eachB.matrixY == y):
-						each.enpassant = eachB
-						break
-				break
-
-		return clone
-
-	def flipBoard(self):
-		for pieceWhite in self.whitePieces:
-			if(self.flipped):
-				pieceWhite.pixelPosX = pieceWhite.matrixX*pieceSize + startX
-				pieceWhite.pixelPosY = pieceWhite.matrixY*pieceSize + startY
-			else:
-				pieceWhite.pixelPosX = (7 - pieceWhite.matrixX)*pieceSize + startX
-				pieceWhite.pixelPosY = (7 - pieceWhite.matrixY)*pieceSize + startY
-
-		for pieceBlack in self.blackPieces:
-			if(self.flipped):
-				pieceBlack.pixelPosX = pieceBlack.matrixX*pieceSize + startX
-				pieceBlack.pixelPosY = pieceBlack.matrixY*pieceSize + startY
-			else:
-				pieceBlack.pixelPosX = (7 - pieceBlack.matrixX)*pieceSize + startX
-				pieceBlack.pixelPosY = (7 - pieceBlack.matrixY)*pieceSize + startY
-
-		self.show()
-		self.flipped = not self.flipped
-
-	def destroy(self):
-		for piece in self.whitePieces:
-			piece.isTaken = True
-		for piece in self.blackPieces:
-			piece.isTaken = True
-		self.show()
-		self.whitePieces.clear()
-		self.blackPieces.clear()
 
 #check if move is legal or not
 def isPseudoLegal(x, y, mine, board):
@@ -554,13 +126,13 @@ def promoteTo(event, piece, which, x, y, board):
 		while i < n:
 			if(board.whitePieces[i].movingThisPiece):
 				if(which == 'Q'):
-					newpiece = Queen(x, y, whitesMove)
+					newpiece = Queen(x, y, whitesMove, board.boardFrame, pieceImage.pieces_white[2])
 				elif(which == 'B'):
-					newpiece = Bishop(x, y, whitesMove)
+					newpiece = Bishop(x, y, whitesMove, board.boardFrame, pieceImage.pieces_white[3])
 				elif(which == 'R'):
-					newpiece = Rook(x, y, whitesMove)
+					newpiece = Rook(x, y, whitesMove, board.boardFrame, pieceImage.pieces_white[0])
 				elif(which == 'N'):
-					newpiece = Knight(x, y, whitesMove)
+					newpiece = Knight(x, y, whitesMove, board.boardFrame, pieceImage.pieces_white[4])
 				board.whitePieces[i] = newpiece
 			i += 1
 	else:
@@ -568,13 +140,13 @@ def promoteTo(event, piece, which, x, y, board):
 		while i < n:
 			if(board.blackPieces[i].movingThisPiece):
 				if(which == 'Q'):
-					newpiece = Queen(x, y, whitesMove)
+					newpiece = Queen(x, y, whitesMove, board.boardFrame, pieceImage.pieces_black[2])
 				elif(which == 'B'):
-					newpiece = Bishop(x, y, whitesMove)
+					newpiece = Bishop(x, y, whitesMove, board.boardFrame, pieceImage.pieces_black[3])
 				elif(which == 'R'):
-					newpiece = Rook(x, y, whitesMove)
+					newpiece = Rook(x, y, whitesMove, board.boardFrame, pieceImage.pieces_black[0])
 				elif(which == 'N'):
-					newpiece = Knight(x, y, whitesMove)
+					newpiece = Knight(x, y, whitesMove, board.boardFrame, pieceImage.pieces_black[4])
 				board.blackPieces[i] = newpiece
 			i += 1
 
@@ -636,22 +208,26 @@ def isGameOver(board, static):
 				result = '1/2-1/2'
 
 			moveNotation.append(result)
-			gameNotation.changeGameNotation(moveNotation)
+			gameNotation.changeGameNotation(moveNotation, callback)
 
 		for piece in board.whitePieces:
 			piece.isTaken = True
 		for piece in board.blackPieces:
 			piece.isTaken = True
 
-		depth1.config(text='')
-		score1.config(text='')
-		line1.config(text='')
-		depth2.config(text='')
-		score2.config(text='')
-		line2.config(text='')
-		depth3.config(text='')
-		score3.config(text='')
-		line3.config(text='')
+		for each in range(0, engineEval.lines):
+			for x in range(0, 3):
+				engineEval.evalLines[each][x].configure(text='')
+
+		# depth1.config(text='')
+		# score1.config(text='')
+		# line1.config(text='')
+		# depth2.config(text='')
+		# score2.config(text='')
+		# line2.config(text='')
+		# depth3.config(text='')
+		# score3.config(text='')
+		# line3.config(text='')
 
 	return ret
 
@@ -661,12 +237,12 @@ def genFEN():
 #load posn from FEN string
 def loadFEN():
 	#NOTE - some details left complete later
-	global pgnText
+	# global pgnText
 	global curr_board
 
 	new()
-	fenString = pgnText.get(1.0, tk.END).strip().rstrip().split()
-	pgnText.delete(1.0, tk.END)
+	fenString = addon.pgnText.get(1.0, tk.END).strip().rstrip().split()
+	addon.pgnText.delete(1.0, tk.END)
 	
 	try:
 		curr_board.destroy()
@@ -711,10 +287,10 @@ def loadFEN():
 				curr_board.blackPieces.append(piece)
 		setCastlingRights(curr_board, fenString[2])
 		curr_board.show()
-		pgnText.insert(tk.END, "FEN Loaded")
+		addon.pgnText.insert(tk.END, "FEN Loaded")
 	except:
 		new()
-		pgnText.insert(tk.END, "It is not a valid FEN String.")
+		addon.pgnText.insert(tk.END, "It is not a valid FEN String.")
 
 def setCastlingRights(board, fenString):
 	whiteShort = False
@@ -857,7 +433,7 @@ def updateNotation(piece, x, y, isAttacking, board):
 	LAN.append(getLAN(piece, x, y, board))
 	moveNotation.append(currMoveNotation)
 
-	gameNotation.changeGameNotation(moveNotation)
+	gameNotation.changeGameNotation(moveNotation, callback)
 
 #moving of pieces
 def moveTo(x, y, board, static):
@@ -888,7 +464,7 @@ def moveTo(x, y, board, static):
 					updateNotation(piece, x, y, True if attacking is not None else False, board)
 
 				
-				if(isinstance(piece, Pawn)):
+				if(isPawn(piece.letter)):
 					piece.letter = chr(ord('a') + x)
 
 				#move the piece, change turns
@@ -974,7 +550,7 @@ def releaseB1(event):
 	global movingPiece
 	global curr_index
 	global curr_board
-	global last_tag
+	# global last_tag
 	
 	if(movingPiece is None):
 		return
@@ -988,9 +564,9 @@ def releaseB1(event):
 		forward(True, moveNotation, curr_board, False)
 
 	try:
-		gameNotation.scrolledtext.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
-		last_tag = 'tag' + str(len(moveNotation)-1)
-		gameNotation.scrolledtext.tag_config(last_tag, foreground="black", background='#ADD8E6', font=('bold'))
+		gameNotation.scrolledtext.tag_config(gameNotation.last_tag, foreground='black', font=('consolas', '12', 'normal')) 
+		gameNotation.last_tag = 'tag' + str(len(moveNotation)-1)
+		gameNotation.scrolledtext.tag_config(gameNotation.last_tag, foreground="black", background='#ADD8E6', font=('bold'))
 	except:
 		pass
 
@@ -1061,7 +637,7 @@ def isPawn(a):
 #move through gamenotation forward by 1 move
 def forward(static, moveNotation, board, fromBackward):
 	global curr_index
-	global last_tag
+	# global last_tag
 	
 	curr_index += 1
 	if(curr_index >= len(moveNotation)):
@@ -1161,9 +737,9 @@ def forward(static, moveNotation, board, fromBackward):
 		myLabel.config(text="Game ended in a draw")
 		return
 
-	gameNotation.scrolledtext.tag_config(last_tag, foreground='black', background='white', font=('consolas', '12', 'normal')) 
-	last_tag = 'tag' + str(curr_index)
-	gameNotation.scrolledtext.tag_config(last_tag, foreground="black", background='#ADD8E6', font=('bold'))
+	gameNotation.scrolledtext.tag_config(gameNotation.last_tag, foreground='black', background='white', font=('consolas', '12', 'normal')) 
+	gameNotation.last_tag = 'tag' + str(curr_index)
+	gameNotation.scrolledtext.tag_config(gameNotation.last_tag, foreground="black", background='#ADD8E6', font=('bold'))
 
 	if(not fromBackward):
 		stopThread()
@@ -1174,12 +750,12 @@ def forward(static, moveNotation, board, fromBackward):
 def backward():
 	global curr_index
 	global curr_board
-	global last_tag
+	# global last_tag
 
 	temp = curr_index - 1
 
 	curr_board.destroy()
-	curr_board = Board()
+	curr_board = Board(boardFrame, pieceImage)
 	curr_board.show()
 	curr_index = -1
 
@@ -1192,9 +768,9 @@ def backward():
 		forward(True, moveNotation, curr_board, True)
 		i += 1
 
-	gameNotation.scrolledtext.tag_config(last_tag, foreground='black', background='white', font=('consolas', '12', 'normal')) 
-	last_tag = 'tag' + str(curr_index)
-	gameNotation.scrolledtext.tag_config(last_tag, foreground="black", background='#ADD8E6', font=('bold'))
+	gameNotation.scrolledtext.tag_config(gameNotation.last_tag, foreground='black', background='white', font=('consolas', '12', 'normal')) 
+	gameNotation.last_tag = 'tag' + str(curr_index)
+	gameNotation.scrolledtext.tag_config(gameNotation.last_tag, foreground="black", background='#ADD8E6', font=('bold'))
 	stopThread()
 	if(analyzingMode):
 		startThread()
@@ -1212,7 +788,7 @@ def new():
 	global analyzingMode
 
 	curr_board.destroy()
-	curr_board = Board()
+	curr_board = Board(boardFrame, pieceImage)
 	curr_board.show()
 	curr_index = -1
 	movingPiece = None
@@ -1249,7 +825,8 @@ def flip():
 def initEngine():
 	global engine
 
-	engine = sb.Popen('D:\\CPP\\Chess\\stockfish13.exe', stdin=sb.PIPE, stdout=sb.PIPE, stderr=sb.STDOUT)
+	file = os.getcwd() + '/stockfish13'
+	engine = sb.Popen(file, stdin=sb.PIPE, stdout=sb.PIPE, stderr=sb.STDOUT)
 	put(b'uci\n', inf_list, 0, b'isready\n', 'readyok')
 	put(b'setoption name Hash value 128\n', inf_list, 0, b'isready\n', 'readyok')
 	put(b'setoption name Multipv value 3\n', inf_list, 0, b'isready\n', 'readyok')
@@ -1283,15 +860,14 @@ def runAnalysis(LAN):
 	global curr_board
 	global againstAI
 	global evaluation
-	global last_tag
 
 	if(engine is None):
 		initEngine()
 
 	lan = ''
 
-	if(last_tag):
-		cnt = int(last_tag[3:len(last_tag)])
+	if(gameNotation.last_tag):
+		cnt = int(gameNotation.last_tag[3:len(gameNotation.last_tag)])
 		if(cnt >= 0):
 			for each in range(cnt+1):
 				lan += LAN[each]
@@ -1342,19 +918,14 @@ def runAnalysis(LAN):
 							break
 						lineInfo += moveInSAN + ' '
 
-			if(line == '1'):
-				depth1.config(text=depth)
-				score1.config(text=score)
-				line1.config(text=lineInfo)
+			line = int(line) - 1
+			engineEval.evalLines[line][0].config(text=depth)
+			engineEval.evalLines[line][1].config(text=score)
+			engineEval.evalLines[line][2].config(text=lineInfo)
+			
+			if(line == 0):
 				evaluation = score
-			elif(line == '2'):
-				depth2.config(text=depth)
-				score2.config(text=score)
-				line2.config(text=lineInfo)
-			elif(line == '3'):
-				depth3.config(text=depth)
-				score3.config(text=score)
-				line3.config(text=lineInfo)
+
 		except Exception as e:
 			continue
 		finally:
@@ -1409,15 +980,10 @@ def stopThread():
 		if len(res) > 0 and res[0] == 'readyok':
 			break
 
-	depth1.config(text='')
-	score1.config(text='')
-	line1.config(text='')
-	depth2.config(text='')
-	score2.config(text='')
-	line2.config(text='')
-	depth3.config(text='')
-	score3.config(text='')
-	line3.config(text='')
+	for each in range(0, engineEval.lines):
+			for x in range(0, 3):
+				engineEval.evalLines[each][x].configure(text='')
+
 	print("Stopped")
 
 #choose commands for engine
@@ -1427,7 +993,7 @@ def runEngine():
 	global engine
 	global curr_board
 	global analyzingMode
-	global last_tag
+	# global last_tag
 	global evaluation
 
 	if isGameOver(curr_board, True) or analyzingMode:
@@ -1438,8 +1004,8 @@ def runEngine():
 
 	lan = ''
 
-	if(last_tag):
-		cnt = int(last_tag[3:len(last_tag)])
+	if(gameNotation.last_tag):
+		cnt = int(gameNotation.last_tag[3:len(gameNotation.last_tag)])
 		if(cnt >= 0):
 			for each in range(cnt+1):
 				lan += LAN[each]
@@ -1589,14 +1155,11 @@ def popup_bonus(piece, x, y, whitesMove, board):
 	knight.bind("<Button-1>",lambda event, piece=piece, x=x, y=y, which="N", board=board : promoteTo(event, piece, which, x, y, board))
 
 #search database for games
-def searchDB():
-	global dbInfo
-	global moveNotation
-
+def searchDB(moveNotation):
 	db = open('chessdotcomdb.json', 'r')
 	data = json.load(db)
-	dbInfo.configure(state='normal')
-	dbInfo.delete(1.0, tk.END)
+	addon.dbInfo.configure(state='normal')
+	addon.dbInfo.delete(1.0, tk.END)
 
 	asWhite = 0
 	asBlack = 0
@@ -1626,17 +1189,17 @@ def searchDB():
 				except:
 					nextBlack[game['moves'][j]] = 1
 
-	dbInfo.insert(tk.END, 'You have reached this position as White %d times\n' % asWhite)
+	addon.dbInfo.insert(tk.END, 'You have reached this position as White %d times\n' % asWhite)
 
 	for key, value in sorted(nextWhite.items(), key=lambda item: item[1], reverse=True):
-		dbInfo.insert(tk.END, 'Move: %s - %d times\n' % (key, value))
+		addon.dbInfo.insert(tk.END, 'Move: %s - %d times\n' % (key, value))
 
-	dbInfo.insert(tk.END, '\nYou have reached this position as Black %d times\n' % asBlack)
+	addon.dbInfo.insert(tk.END, '\nYou have reached this position as Black %d times\n' % asBlack)
 
 	for key, value in sorted(nextBlack.items(), key=lambda item: item[1], reverse=True):
-		dbInfo.insert(tk.END, 'Move: %s - %d times\n' % (key, value))
+		addon.dbInfo.insert(tk.END, 'Move: %s - %d times\n' % (key, value))
 
-	dbInfo.configure(state='disabled')
+	addon.dbInfo.configure(state='disabled')
 
 #load pgn
 def loadPGN():
@@ -1644,7 +1207,8 @@ def loadPGN():
 	global curr_board
 
 	new()
-	moves = pgnText.get('1.0', tk.END).split()
+	moves = addon.pgnText.get('1.0', tk.END).split()
+	print(moves)
 	move = []
 	length = len(moves)
 	moveNo = 1
@@ -1664,18 +1228,18 @@ def loadPGN():
 				break
 		j = j+1
 
+	print(move)
 	for each in move:
 		forward(False, move, curr_board, True)
 
-	pgnText.delete(1.0, tk.END)
-	pgnText.insert(tk.END, "PGN Loaded\n")
+	addon.pgnText.delete(1.0, tk.END)
+	addon.pgnText.insert(tk.END, "PGN Loaded\n")
 
 engine = None
 inf_list = []
 
 def callback(event, tag, moveNo):
 	global curr_index
-	global last_tag
 	global analyzingMode
 
 	index = event.widget.index("@%s,%s" % (event.x, event.y))
@@ -1697,151 +1261,11 @@ def callback(event, tag, moveNo):
 			index = each
 			break
 
-	# gameNotation.tag_config(last_tag, foreground='black', font=('consolas', '12', 'normal')) 
-	# last_tag = tag
-	# gameNotation.tag_config(last_tag, foreground="blue", font=('bold'))
 	assert(index != -1)
 	curr_index = index + 1
 	backward()
 
-# root.update()
-# bgImg = 
-# backgroundLabel = tk.Label(root, image=bgImg)
-# backgroundLabel.grid(row=0, column=0)
 
-# class MainFrame():
-# 	def __init__(self, master):
-# 		self.master = master
-# 		self.frame = tk.Frame(self.master)
-# 		self.backgroundLabel = tk.Label(self.frame, image = pieceImage.backgroundImage)
-# 		self.place()
-
-# 	def place(self):
-# 		self.frame.grid(row=0, column=0,sticky='nw')
-# 		self.backgroundLabel.grid(row=0, column=0)
-
-class BoardFrame:
-	def __init__(self, master):
-		self.master = master
-		self.frame = tk.Frame(self.master, bg='#A0522D')
-		self.canvas = tk.Canvas(self.frame, width=pieceSize*8 + startX, height=pieceSize*8 + startY)
-		self.init_canvas()
-		self.place()
-
-	def init_canvas(self):
-		self.canvas.create_image(startX,startY, image=pieceImage.boardImage, anchor="nw")
-		self.canvas.bind('<Button-1>', moveB1)
-		self.canvas.bind('<B1-Motion>', motionB1)
-		self.canvas.bind('<ButtonRelease-1>', releaseB1)
-		self.canvas.bind('<Button-3>', moveB3)
-		self.canvas.bind('<B3-Motion>', motionB3)
-		self.canvas.bind('<ButtonRelease-3>', releaseB3)
-
-	def place(self):
-		# self.frame.lift()
-		self.frame.grid(row=0, column=0)
-		self.canvas.grid(row=0, column=0, padx=padding, pady=padding)
-
-class PieceImage:
-	def __init__(self, master):
-		self.master = master
-		self.backgroundImage = ImageTk.PhotoImage(Image.open("101403-0.161844ff.jpg").resize((self.master.winfo_width(), self.master.winfo_height())))
-		self.boardImage = ImageTk.PhotoImage(Image.open("board0.png").resize((pieceSize*8, pieceSize*8)))
-		self.pieces_black = []
-		self.pieces_white = []
-		self.initBlackPieces()
-		self.initWhitePieces()
-
-	def initBlackPieces(self):
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("rook_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("king_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("queen_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("bishop_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("knight_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("pawn_black.png").resize((pieceSize, pieceSize))))
-
-	def initWhitePieces(self):
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("rook_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("king_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("queen_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("bishop_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("knight_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("pawn_white.png").resize((pieceSize, pieceSize))))
-
-#Move List
-class GameNotation():
-	def __init__(self, master):
-		self.master = master
-		self.frame = tk.Frame(self.master)
-		self.scrolledtext = tk.scrolledtext.ScrolledText(self.frame, state='disabled', width = 20, height=21, bg='#DCDCDC')
-		self.scrolledtext['font'] = ('consolas', '12')
-		self.place()
-
-	def place(self):
-		self.frame.grid(row=0, column=1)
-		self.scrolledtext.grid(row=0, column=0, sticky='nw', padx=padding, pady=padding)
-
-	def changeGameNotation(self, moveNotation):
-		global last_tag
-
-		allmoves = ''
-		moveNo = 1
-		tag_count = 0
-		self.scrolledtext.configure(state='normal')
-		self.scrolledtext.delete(1.0, tk.END)
-
-		for tag in self.scrolledtext.tag_names():
-			self.scrolledtext.tag_delete(tag)
-
-		for move in range(len(moveNotation)):
-			allmoves = ''
-			if(move % 2 == 0):
-				if(moveNotation[move] != '1-0' and moveNotation[move] != '0-1' and moveNotation[move] != '1/2-1/2'):
-					allmoves += str(moveNo) + ('.  ' if moveNo <= 9 else '. ')
-				self.scrolledtext.insert(tk.END, allmoves)
-				moveNo += 1
-
-				allmoves = ''
-				curr_tag = 'tag' + str(tag_count)
-				left = 8 - len(moveNotation[move])
-				allmoves = moveNotation[move]
-				self.scrolledtext.insert(tk.END, allmoves, curr_tag)
-				self.scrolledtext.insert(tk.END, (' ' * left))
-			else:
-				allmoves = moveNotation[move]
-				curr_tag = 'tag' + str(tag_count)
-				self.scrolledtext.insert(tk.END, allmoves, curr_tag)
-				self.scrolledtext.insert(tk.END, '\n')
-
-			self.scrolledtext.tag_bind(curr_tag, "<Button-1>", lambda event, tag = curr_tag, moveNo=moveNo-1: callback(event, tag, moveNo))
-			tag_count += 1
-		
-		last_tag = 'tag' + str(tag_count - 1)
-		self.scrolledtext.tag_config(last_tag, foreground="black", background='#ADD8E6', font=('bold'))
-		self.scrolledtext.see(tk.END)
-		self.scrolledtext.configure(state='disabled')
-
-# gameNotation = 
-# gameNotation
-# gameNotation
-
-#DB, PGN and FEN
-addon = tk.Frame(root)
-addonButtons = tk.Frame(addon)
-dbInfo = tk.scrolledtext.ScrolledText(addon, state='disabled', width = 40, height = 15)
-pgnText = tk.scrolledtext.ScrolledText(addon, width=40, height = 5)
-searchDbButton = tk.Button(addon, text='Search DB', command=searchDB)
-loadPGN = tk.Button(addonButtons, text="Load PGN", command=loadPGN)
-generateFEN = tk.Button(addonButtons, text="Generate FEN", command=genFEN)
-loadFEN = tk.Button(addonButtons, text="Load FEN", command=loadFEN)
-addon.grid(row=0, column=2, sticky='nw', padx=padding, pady=padding)
-dbInfo.grid(row=0, column=0, padx=padding, pady=padding)
-searchDbButton.grid(row=1, column=0, padx=padding, pady=padding)
-pgnText.grid(row=2, column=0, padx=padding, pady=padding)
-addonButtons.grid(row=5, column=0)
-loadPGN.grid(row=0, column=0, padx=padding, pady=padding)
-loadFEN.grid(row=0, column=1, padx=padding, pady=padding)
-generateFEN.grid(row=0, column=2, padx=padding, pady=padding)
 
 #Additional Text
 myLabel = tk.Label(root, text="")
@@ -1871,40 +1295,31 @@ analysisButton.grid(row=0, column=2, padx=padding, pady=padding)
 playComputerButton.grid(row=0, column=0, padx=padding, pady=padding)
 betweenEngine.grid(row=0, column=1, padx=padding, pady=padding)
 
-#Engine Evaluations
-engineEval = tk.Frame(root)
-header1 = tk.Label(engineEval, text="Depth", anchor='w', width = 5, font=("Courier", fonstSize))
-header2 = tk.Label(engineEval, text="Score", anchor='w', width = 5, font=("Courier", fonstSize))
-header3 = tk.Label(engineEval, text="Line", anchor='w', width = 50, font=("Courier", fonstSize))
-depth1 = tk.Label(engineEval, text='', anchor='w', width = 5, font=("Courier", fonstSize))
-depth2 = tk.Label(engineEval, text='', anchor='w', width = 5, font=("Courier", fonstSize))
-depth3 = tk.Label(engineEval, text='', anchor='w', width = 5, font=("Courier", fonstSize))
-score1 = tk.Label(engineEval, text='', anchor='w', width = 5, font=("Courier", fonstSize))
-score2 = tk.Label(engineEval, text='', anchor='w', width = 5, font=("Courier", fonstSize))
-score3 = tk.Label(engineEval, text='',anchor='w', width = 5, font=("Courier", fonstSize))
-line1 = tk.Label(engineEval, text='',anchor='w', width = 50, font=("Courier", fonstSize))
-line2 = tk.Label(engineEval, text='', anchor='w', width = 50, font=("Courier", fonstSize))
-line3 = tk.Label(engineEval, text='', anchor='w', width = 50, font=("Courier", fonstSize))
-engineEval.grid(row=4, column=0)
-header1.grid(row=0, column=1)
-header2.grid(row=0, column=2)
-header3.grid(row=0, column=3)
-depth1.grid(row=1, column=1)
-depth2.grid(row=2, column=1)
-depth3.grid(row=3, column=1)
-score1.grid(row=1, column=2)
-score2.grid(row=2, column=2)
-score3.grid(row=3, column=2)
-line1.grid(row=1, column=3)
-line2.grid(row=2, column=3)
-line3.grid(row=3, column=3)
+	
+def init_canvas(boardFrame):
+	boardFrame.canvas.create_image(startX,startY, image=pieceImage.boardImage, anchor="nw")
+	boardFrame.canvas.bind('<Button-1>', moveB1)
+	boardFrame.canvas.bind('<B1-Motion>', motionB1)
+	boardFrame.canvas.bind('<ButtonRelease-1>', releaseB1)
+	boardFrame.canvas.bind('<Button-3>', moveB3)
+	boardFrame.canvas.bind('<B3-Motion>', motionB3)
+	boardFrame.canvas.bind('<ButtonRelease-3>', releaseB3)
 
 if __name__ == "__main__":
 	pieceImage = PieceImage(root)
-	# mainFrame = MainFrame(root)
 	boardFrame = BoardFrame(root)
+	addon = AddOn(root)
+	engineEval = EngineEvals(root, lines=3)
+	
+	addon.searchDbButton.configure(command=lambda: searchDB(moveNotation))
+	addon.loadPGN.configure(command=loadPGN)
+	addon.generateFEN.configure(command=genFEN)
+	addon.loadFEN.configure(command=loadFEN)
+
+	init_canvas(boardFrame)
+
 	evalBar()
 	gameNotation = GameNotation(root)
-	curr_board = Board()
+	curr_board = Board(boardFrame, pieceImage)
 	curr_board.show()
 	root.mainloop()
