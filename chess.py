@@ -825,7 +825,7 @@ def flip():
 def initEngine():
 	global engine
 
-	file = os.getcwd() + '/stockfish13'
+	file = os.getcwd() + '/stockfish_14'
 	engine = sb.Popen(file, stdin=sb.PIPE, stdout=sb.PIPE, stderr=sb.STDOUT)
 	put(b'uci\n', inf_list, 0, b'isready\n', 'readyok')
 	put(b'setoption name Hash value 128\n', inf_list, 0, b'isready\n', 'readyok')

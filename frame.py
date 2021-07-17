@@ -11,28 +11,28 @@ fonstSize = 15
 class PieceImage:
 	def __init__(self, master):
 		self.master = master
-		self.backgroundImage = ImageTk.PhotoImage(Image.open("101403-0.161844ff.jpg").resize((self.master.winfo_width(), self.master.winfo_height())))
-		self.boardImage = ImageTk.PhotoImage(Image.open("board0.png").resize((pieceSize*8, pieceSize*8)))
+		self.backgroundImage = ImageTk.PhotoImage(Image.open("assets/101403-0.161844ff.jpg").resize((self.master.winfo_width(), self.master.winfo_height())))
+		self.boardImage = ImageTk.PhotoImage(Image.open("assets/board0.png").resize((pieceSize*8, pieceSize*8)))
 		self.pieces_black = []
 		self.pieces_white = []
 		self.initBlackPieces()
 		self.initWhitePieces()
 
 	def initBlackPieces(self):
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("rook_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("king_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("queen_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("bishop_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("knight_black.png").resize((pieceSize, pieceSize))))
-		self.pieces_black.append(ImageTk.PhotoImage(Image.open("pawn_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("assets/pieces/rook_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("assets/pieces/king_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("assets/pieces/queen_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("assets/pieces/bishop_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("assets/pieces/knight_black.png").resize((pieceSize, pieceSize))))
+		self.pieces_black.append(ImageTk.PhotoImage(Image.open("assets/pieces/pawn_black.png").resize((pieceSize, pieceSize))))
 
 	def initWhitePieces(self):
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("rook_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("king_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("queen_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("bishop_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("knight_white.png").resize((pieceSize, pieceSize))))
-		self.pieces_white.append(ImageTk.PhotoImage(Image.open("pawn_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("assets/pieces/rook_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("assets/pieces/king_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("assets/pieces/queen_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("assets/pieces/bishop_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("assets/pieces/knight_white.png").resize((pieceSize, pieceSize))))
+		self.pieces_white.append(ImageTk.PhotoImage(Image.open("assets/pieces/pawn_white.png").resize((pieceSize, pieceSize))))
 
 class BoardFrame:
 	def __init__(self, master):
